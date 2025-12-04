@@ -51,7 +51,37 @@ export interface Expense {
     name: string;
   };
   createdAt: number;
+  splitDetails?: {
+    splitType: 'equal' | 'percentage' | 'custom';
+    participants: Array<{
+      userId: string;
+      userName: string;
+      amount: number; // Amount this person owes
+      percentage?: number; // If percentage split
+    }>;
+    paidBy: string; // User ID who paid
+    settlements?: Array<{
+      fromUserId: string;
+      toUserId: string;
+      amount: number;
+      settledAt: number;
+      settledBy: string; // User ID who marked it as settled
+    }>; // Track which debts have been paid
+  };
 }
+
+export interface Settlement {
+  id: string;
+  expenseId: string;
+  fromUserId: string;
+  toUserId: string;
+  amount: number;
+  settled: boolean;
+  settledAt?: number;
+  walletId: string;
+}
+
+export type SplitDetails = Expense['splitDetails'];
 
 export interface AuthContextType {
   user: User | null;
@@ -97,10 +127,21 @@ export interface StoreContextType {
   monthlyStats: MonthlyStats;
   pieChartData: PieChartData[];
   
-  addExpense: (amount: number, category: Category, note: string, date?: Date) => Promise<void>;
+  addExpense: (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => Promise<void>;
   updateExpense: (id: string, amount: number, note: string) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
   setExpenses: (expenses: Expense[]) => void;
+  
+  // Expense Splitting
+  getMemberBalances: () => Record<string, number>; // userId -> net balance (positive = owed money, negative = owes money)
+  markSettlement: (expenseId: string, fromUserId: string, toUserId: string) => Promise<void>;
+  
+  // Category Management
+  customCategories: Category[];
+  addCustomCategory: (category: Category) => Promise<void>;
+  updateCustomCategory: (categoryId: string, updates: Partial<Category>) => Promise<void>;
+  deleteCustomCategory: (categoryId: string) => Promise<void>;
+  getAllCategories: () => Category[]; // Returns default + custom categories merged
   
   // UI
   notifications: Notification[];

@@ -1,6 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { StoreContextType, Expense, Notification, NotificationType, Language, Category, MonthlyStats, PieChartData, Wallet, CountryCode } from '../types';
+import { StoreContextType, Expense, Notification, NotificationType, Language, Category, MonthlyStats, PieChartData, Wallet, CountryCode, SplitDetails } from '../types';
 import { DEFAULT_COUNTRY } from '../constants/countries';
 import * as storage from '../services/storageService';
 import { useAuth } from './AuthContext';
@@ -12,6 +12,7 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined);
 const ACTIVE_WALLET_KEY = 'kharcha_bachau_active_wallet_id';
 const LANGUAGE_KEY = 'kharcha_bachau_language';
 const COUNTRY_KEY = 'kharcha_bachau_country';
+const CUSTOM_CATEGORIES_KEY = 'kharcha_bachau_custom_categories';
 
 export const useStore = () => {
   const context = useContext(StoreContext);
@@ -72,6 +73,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Data State
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budget, setBudgetState] = useState(20000);
+  const [customCategories, setCustomCategoriesState] = useState<Category[]>([]);
   
   // Derived Stats
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats>({
@@ -327,7 +329,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [user, createNewWallet, showNotification]);
 
-  const addExpense = useCallback(async (amount: number, category: Category, note: string, date?: Date) => {
+  const addExpense = useCallback(async (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => {
     if (!user || !activeWallet) return;
     try {
         const dateStr = date ? format(date, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
@@ -337,7 +339,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             categoryEmoji: category.emoji,
             amount,
             note,
-            date: dateStr
+            date: dateStr,
+            splitDetails
         });
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
         showNotification('success', 'Expense added');
@@ -382,12 +385,239 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [user, activeWallet, showNotification]);
 
+  // Calculate member balances from expenses
+  const getMemberBalances = useCallback((): Record<string, number> => {
+    if (!activeWallet || !expenses.length) return {};
+    
+    const balances: Record<string, number> = {};
+    
+    // Initialize balances for all members
+    activeWallet.members.forEach(memberId => {
+      balances[memberId] = 0;
+    });
+    
+    // Calculate balances from split expenses (accounting for settlements)
+    expenses.forEach(expense => {
+      if (expense.splitDetails) {
+        const { paidBy, participants, settlements = [] } = expense.splitDetails;
+        
+        // Person who paid gets credited with the full amount
+        if (balances[paidBy] !== undefined) {
+          balances[paidBy] += expense.amount;
+        }
+        
+        // Participants owe their share
+        participants.forEach(participant => {
+          if (balances[participant.userId] !== undefined) {
+            // Check if this participant's debt has been settled
+            const settlement = settlements.find(
+              s => s.fromUserId === participant.userId && s.toUserId === paidBy
+            );
+            
+            if (!settlement) {
+              // Not settled: participant owes the amount
+              balances[participant.userId] -= participant.amount;
+            } else {
+              // Settled: participant has paid, so don't subtract from their balance
+              // Instead, reduce the payer's balance by the settled amount (they got paid back)
+              if (balances[paidBy] !== undefined) {
+                balances[paidBy] -= settlement.amount;
+              }
+              // Participant's balance remains unchanged (they've cleared their debt)
+            }
+          }
+        });
+      }
+    });
+    
+    return balances;
+  }, [activeWallet, expenses]);
+
+  // Load custom categories from Firestore/localStorage
+  useEffect(() => {
+    if (!user) {
+      setCustomCategoriesState([]);
+      return;
+    }
+    
+    const loadCategories = async () => {
+      try {
+        const categories = await storage.getCustomCategories(user);
+        setCustomCategoriesState(categories);
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.error('Error loading custom categories:', error);
+        }
+      }
+    };
+    
+    loadCategories();
+  }, [user]);
+
+  // Save custom categories to Firestore/localStorage
+  useEffect(() => {
+    if (!user || customCategories.length === 0) return;
+    
+    const saveCategories = async () => {
+      try {
+        await storage.saveCustomCategories(user, customCategories);
+      } catch (error) {
+        if (import.meta.env.DEV) {
+          console.error('Error saving custom categories:', error);
+        }
+      }
+    };
+    
+    // Debounce saves to avoid too many writes
+    const timeoutId = setTimeout(saveCategories, 500);
+    return () => clearTimeout(timeoutId);
+  }, [customCategories, user]);
+
+  // Get all categories (default + custom)
+  const getAllCategories = useCallback((): Category[] => {
+    // Merge default and custom categories, custom ones take precedence if same ID
+    const categoryMap = new Map<string, Category>();
+    
+    // Add default categories first
+    EXPENSE_CATEGORIES.forEach(cat => {
+      categoryMap.set(cat.id, cat);
+    });
+    
+    // Override/add custom categories
+    customCategories.forEach(cat => {
+      categoryMap.set(cat.id, cat);
+    });
+    
+    return Array.from(categoryMap.values());
+  }, [customCategories]);
+
+  // Category Management
+  const addCustomCategory = useCallback(async (category: Category) => {
+    // Validate category
+    if (!category.id || !category.name || !category.emoji) {
+      showNotification('error', 'Invalid category data');
+      return;
+    }
+    
+    // Check if ID already exists
+    if (customCategories.find(c => c.id === category.id) || EXPENSE_CATEGORIES.find(c => c.id === category.id)) {
+      showNotification('error', 'Category ID already exists');
+      return;
+    }
+    
+    setCustomCategoriesState(prev => [...prev, category]);
+    showNotification('success', 'Category added');
+    triggerHaptic();
+  }, [customCategories, showNotification, triggerHaptic]);
+
+  const updateCustomCategory = useCallback(async (categoryId: string, updates: Partial<Category>) => {
+    const category = customCategories.find(c => c.id === categoryId);
+    if (!category) {
+      showNotification('error', 'Category not found');
+      return;
+    }
+    
+    // Can't update default categories
+    if (EXPENSE_CATEGORIES.find(c => c.id === categoryId)) {
+      showNotification('error', 'Cannot modify default categories');
+      return;
+    }
+    
+    setCustomCategoriesState(prev => prev.map(c => 
+      c.id === categoryId ? { ...c, ...updates } : c
+    ));
+    showNotification('success', 'Category updated');
+    triggerHaptic();
+  }, [customCategories, showNotification, triggerHaptic]);
+
+  const deleteCustomCategory = useCallback(async (categoryId: string) => {
+    // Can't delete default categories
+    if (EXPENSE_CATEGORIES.find(c => c.id === categoryId)) {
+      showNotification('error', 'Cannot delete default categories');
+      return;
+    }
+    
+    // Check if category is used in expenses
+    const isUsed = expenses.some(e => e.categoryId === categoryId);
+    if (isUsed) {
+      showNotification('error', 'Cannot delete category that is used in expenses');
+      return;
+    }
+    
+    setCustomCategoriesState(prev => prev.filter(c => c.id !== categoryId));
+    showNotification('success', 'Category deleted');
+    triggerHaptic();
+  }, [expenses, showNotification, triggerHaptic]);
+
+  const markSettlement = useCallback(async (expenseId: string, fromUserId: string, toUserId: string) => {
+    if (!user || !activeWallet) return;
+    try {
+        const expense = expenses.find(e => e.id === expenseId);
+        if (!expense || !expense.splitDetails) {
+          showNotification('error', 'Expense not found or not split');
+          return;
+        }
+        
+        // Find the debt amount
+        const participant = expense.splitDetails.participants.find(p => p.userId === fromUserId);
+        if (!participant || participant.amount <= 0) {
+          showNotification('error', 'Invalid settlement');
+          return;
+        }
+        
+        // Check if already settled
+        const existingSettlement = expense.splitDetails.settlements?.find(
+          s => s.fromUserId === fromUserId && s.toUserId === toUserId
+        );
+        if (existingSettlement) {
+          showNotification('info', 'Already settled');
+          return;
+        }
+        
+        // Add settlement
+        const updatedSplitDetails = {
+          ...expense.splitDetails,
+          settlements: [
+            ...(expense.splitDetails.settlements || []),
+            {
+              fromUserId,
+              toUserId,
+              amount: participant.amount,
+              settledAt: Date.now(),
+              settledBy: user.id
+            }
+          ]
+        };
+        
+        // Update expense with settlement
+        await storage.updateExpense(user, activeWallet.id, expenseId, {
+          splitDetails: updatedSplitDetails
+        });
+        
+        // Expenses will auto-refresh via subscription, but for guest mode we need to manually update
+        if (user.type === 'guest') {
+          setExpenses(storage.getGuestExpenses());
+        }
+        
+        showNotification('success', 'Payment marked as settled');
+        triggerHaptic();
+    } catch (e: any) {
+        const errorMsg = e?.message || 'Failed to mark settlement';
+        showNotification('error', errorMsg);
+        if (import.meta.env.DEV) {
+            console.error('Error marking settlement:', e);
+        }
+    }
+  }, [user, activeWallet, expenses, showNotification, triggerHaptic, setExpenses]);
+
   const contextValue = useMemo(() => ({
     language, setLanguage,
     country, setCountry,
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
     expenses, budget, setBudget, monthlyStats, pieChartData,
     addExpense, updateExpense, deleteExpense, setExpenses,
+    getMemberBalances, markSettlement,
+    customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories,
     notifications, showNotification, dismissNotification, triggerHaptic
   }), [
     language, setLanguage,
@@ -395,6 +625,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
     expenses, budget, setBudget, monthlyStats, pieChartData,
     addExpense, updateExpense, deleteExpense,
+    getMemberBalances, markSettlement,
+    customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories,
     notifications, showNotification, dismissNotification, triggerHaptic
   ]);
 

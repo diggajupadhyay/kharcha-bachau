@@ -96,7 +96,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-x-hidden">
       {/* Backdrop */}
       <div 
         className="absolute inset-0 bg-slate-900/60"
@@ -104,19 +104,25 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       />
 
       {/* Modal */}
-      <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl relative z-10 overflow-hidden">
+      <div 
+        className="bg-white w-full max-w-sm rounded-xl p-4 shadow-2xl relative z-10 overflow-hidden max-w-full"
+        style={{
+          paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
+          paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))'
+        }}
+      >
         <button 
             onClick={onClose}
-            className="absolute top-4 right-4 p-2 bg-slate-100 rounded-xl active:scale-95"
+            className="absolute top-3 right-3 p-1.5 bg-slate-100 rounded-lg active:scale-95"
         >
-            <X size={24} className="text-slate-600" />
+            <X size={18} className="text-slate-600" />
         </button>
 
-        <div className="mb-8">
-            <h2 className="text-2xl font-bold text-slate-900 mb-3">
+        <div className="mb-4">
+            <h2 className="text-lg font-bold text-slate-900 mb-2">
                 {isResetMode ? 'Reset Password' : isLoginMode ? 'Welcome Back' : 'Create Account'}
             </h2>
-            <p className="text-base text-slate-600">
+            <p className="text-sm text-slate-600">
                 {isResetMode 
                     ? 'Enter your email to receive a password reset link.'
                     : isLoginMode 
@@ -126,43 +132,43 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         </div>
 
         {isResetMode ? (
-          <form onSubmit={handlePasswordReset} className="space-y-6">
-            <div className="space-y-3">
-              <label className="text-base font-semibold text-slate-700 block">Email</label>
+          <form onSubmit={handlePasswordReset} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700 block">Email</label>
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <input 
                   type="email" 
                   value={email}
                   onChange={handleEmailChange}
                   placeholder="name@example.com"
-                  className={`w-full bg-white border-2 pl-12 pr-4 py-4 rounded-2xl text-lg font-medium text-slate-900 focus:outline-none focus:ring-2 ${
+                  className={`w-full bg-white border pl-10 pr-3 py-2.5 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 ${
                     emailError ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20' : 'border-slate-200 focus:border-emerald-500 focus:ring-emerald-500/20'
                   }`}
                   required
                 />
               </div>
               {emailError && (
-                <p className="text-sm text-red-600">{emailError}</p>
+                <p className="text-xs text-red-600">{emailError}</p>
               )}
             </div>
 
             <button 
               type="submit"
               disabled={isLoading || !email || !!emailError}
-              className="w-full py-5 bg-emerald-600 text-white rounded-2xl text-lg font-semibold active:scale-95 flex items-center justify-center gap-3 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 bg-emerald-600 text-white rounded-xl text-sm font-medium active:scale-95 flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
-                <Loader2 size={24} className="animate-spin" />
+                <Loader2 size={18} className="animate-spin" />
               ) : (
                 <>
                   <span>Send Reset Link</span>
-                  <ArrowRight size={20} />
+                  <ArrowRight size={16} />
                 </>
               )}
             </button>
 
-            <div className="mt-6 text-center">
+            <div className="mt-4 text-center">
               <button 
                 type="button"
                 onClick={() => {
@@ -170,24 +176,24 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                   setEmail('');
                   setEmailError('');
                 }}
-                className="text-base font-semibold text-slate-600 active:scale-95"
+                className="text-sm font-medium text-slate-600 active:scale-95"
               >
                 Back to Login
               </button>
             </div>
           </form>
         ) : (
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleSubmit} className="space-y-3">
             <div className="space-y-1.5">
               <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Email</label>
               <div className="relative">
-                <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={20} />
+                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
                 <input 
                   type="email" 
                   value={email}
                   onChange={handleEmailChange}
                   placeholder="name@example.com"
-                  className={`w-full bg-gray-50 pl-12 pr-4 py-4 rounded-xl font-semibold text-gray-900 focus:outline-none focus:bg-white focus:ring-2 transition-all border ${
+                  className={`w-full bg-gray-50 pl-10 pr-3 py-2.5 rounded-lg font-medium text-sm text-gray-900 focus:outline-none focus:bg-white focus:ring-2 transition-all border ${
                     emailError ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20' : 'border-transparent focus:border-green-500/50 focus:ring-green-500/20'
                   }`}
                   required
@@ -198,16 +204,16 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
               )}
             </div>
 
-            <div className="space-y-3">
-              <label className="text-base font-semibold text-slate-700 block">Password</label>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-slate-700 block">Password</label>
               <div className="relative">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                 <input 
                   type="password" 
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full bg-white border-2 border-slate-200 pl-12 pr-4 py-4 rounded-2xl text-lg font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                  className="w-full bg-white border border-slate-200 pl-10 pr-3 py-2.5 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
                   required
                 />
               </div>
@@ -221,7 +227,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                     setIsResetMode(true);
                     setPassword('');
                   }}
-                  className="text-base font-semibold text-emerald-600 active:scale-95"
+                  className="text-sm font-medium text-emerald-600 active:scale-95"
                 >
                   Forgot Password?
                 </button>
@@ -231,14 +237,14 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
             <button 
               type="submit"
               disabled={isLoading || !email || !password || !!emailError}
-              className="w-full py-5 bg-emerald-600 text-white rounded-2xl text-lg font-semibold active:scale-95 flex items-center justify-center gap-3 mt-6 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full py-3 bg-emerald-600 text-white rounded-xl text-sm font-medium active:scale-95 flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? (
-                <Loader2 size={24} className="animate-spin" />
+                <Loader2 size={18} className="animate-spin" />
               ) : (
                 <>
                   <span>{isLoginMode ? 'Log In' : 'Sign Up'}</span>
-                  {isLoginMode ? <ArrowRight size={20} /> : <UserPlus size={20} />}
+                  {isLoginMode ? <ArrowRight size={16} /> : <UserPlus size={16} />}
                 </>
               )}
             </button>
@@ -246,7 +252,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
         )}
 
         {!isResetMode && (
-          <div className="mt-8 text-center pt-6 border-t-2 border-slate-100">
+          <div className="mt-4 text-center pt-4 border-t border-slate-100">
             <button 
               type="button"
               onClick={() => {
@@ -255,7 +261,7 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
                 setPassword('');
                 setEmailError('');
               }}
-              className="text-base font-semibold text-emerald-600 active:scale-95"
+              className="text-sm font-medium text-emerald-600 active:scale-95"
             >
               {isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
             </button>

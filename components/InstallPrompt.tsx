@@ -19,8 +19,15 @@ const InstallPrompt: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-0 left-0 right-0 z-50 px-4 pt-4 pb-2 animate-slide-up">
-      <div className="max-w-md mx-auto bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl shadow-2xl p-4 flex items-center gap-3">
+    <div 
+      className="fixed top-0 left-0 right-0 z-50 px-4 pb-2 animate-slide-up"
+      style={{
+        paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
+        paddingLeft: 'max(1rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(1rem, env(safe-area-inset-right, 0px))'
+      }}
+    >
+      <div className="max-w-md mx-auto bg-gradient-to-r from-emerald-500 to-teal-500 rounded-2xl shadow-2xl p-4 flex items-center gap-3 max-w-full">
         <div className="flex-shrink-0 p-2 bg-white/20 rounded-xl backdrop-blur-sm">
           <Smartphone className="text-white" size={24} />
         </div>

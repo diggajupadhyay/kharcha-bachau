@@ -2,16 +2,17 @@ import React, { useMemo, useState, useCallback } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { TRANSLATIONS } from '../constants';
-import { Trash2, Search, TrendingUp, X } from 'lucide-react';
+import { Trash2, Search, TrendingUp, X, Users } from 'lucide-react';
 import { format, isToday, isYesterday, isSameMonth, subMonths } from 'date-fns';
 import AuthModal from '../components/AuthModal';
 import EditExpenseModal from '../components/EditExpenseModal';
+import BalanceSummary from '../components/BalanceSummary';
 import { Expense } from '../types';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
 
 
 const History: React.FC = () => {
-  const { language, country, expenses, deleteExpense, budget, monthlyStats, pieChartData, activeWallet } = useStore();
+  const { language, country, expenses, deleteExpense, budget, monthlyStats, pieChartData, activeWallet, markSettlement } = useStore();
   const { user } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -19,7 +20,7 @@ const History: React.FC = () => {
   // Filter States
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [dateFilter, setDateFilter] = useState<'today' | 'thisMonth' | 'lastMonth' | 'all'>('today');
+  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'thisMonth' | 'lastMonth' | 'all'>('today');
   const [showAnalyticsDetails, setShowAnalyticsDetails] = useState(false);
   
   // Memoize currentDate - recalculate once per day, not every render
@@ -40,6 +41,11 @@ const History: React.FC = () => {
     // Date Filter
     if (dateFilter === 'today') {
         filtered = filtered.filter(e => e.date === currentDate);
+    } else if (dateFilter === 'yesterday') {
+        const yesterday = new Date(currentDate);
+        yesterday.setDate(yesterday.getDate() - 1);
+        const yesterdayStr = yesterday.toISOString().split('T')[0];
+        filtered = filtered.filter(e => e.date === yesterdayStr);
     } else if (dateFilter === 'thisMonth') {
         filtered = filtered.filter(e => isSameMonth(new Date(e.date), now));
     } else if (dateFilter === 'lastMonth') {
@@ -56,7 +62,8 @@ const History: React.FC = () => {
         );
     }
 
-    return filtered.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    // Sort by createdAt (chronological order - newest first)
+    return filtered.sort((a, b) => b.createdAt - a.createdAt);
   }, [expenses, dateFilter, searchTerm, currentDate]);
 
   const grouped = useMemo(() => {
@@ -64,6 +71,10 @@ const History: React.FC = () => {
       filteredExpenses.forEach(t => {
           if (!groups[t.date]) groups[t.date] = [];
           groups[t.date].push(t);
+      });
+      // Sort expenses within each date group by createdAt (newest first)
+      Object.keys(groups).forEach(date => {
+          groups[date].sort((a, b) => b.createdAt - a.createdAt);
       });
       return groups;
   }, [filteredExpenses]);
@@ -85,6 +96,11 @@ const History: React.FC = () => {
       yesterday.setDate(yesterday.getDate() - 1);
       const yesterdayStr = yesterday.toISOString().split('T')[0];
       comparisonPeriod = expenses.filter(e => e.date === yesterdayStr);
+    } else if (dateFilter === 'yesterday') {
+      const dayBeforeYesterday = new Date(currentDate);
+      dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
+      const dayBeforeYesterdayStr = dayBeforeYesterday.toISOString().split('T')[0];
+      comparisonPeriod = expenses.filter(e => e.date === dayBeforeYesterdayStr);
     } else if (dateFilter === 'thisMonth') {
       comparisonPeriod = expenses.filter(e => isSameMonth(new Date(e.date), subMonths(now, 1)));
     } else if (dateFilter === 'lastMonth') {
@@ -181,35 +197,41 @@ const History: React.FC = () => {
   const budgetProgress = Math.min((currentMonthSpending / budget) * 100, 100);
   const isOverBudget = currentMonthSpending > budget;
   
-  // Show analytics for all filters except 'today'
-  const showAnalytics = dateFilter !== 'today';
+  // Show analytics for all filters except 'today' and 'yesterday'
+  const showAnalytics = dateFilter !== 'today' && dateFilter !== 'yesterday';
   
   // Check if current wallet is a group wallet
   const isGroupWallet = activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1;
 
   return (
-    <div className="pt-6 pb-32 px-6 min-h-full bg-slate-50">
+    <div 
+      className="min-h-full bg-slate-50 overflow-x-hidden"
+      style={{
+        paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
+        paddingLeft: 'max(1rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(1rem, env(safe-area-inset-right, 0px))',
+        paddingBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))'
+      }}
+    >
+      <div className="pt-4 px-4">
        {/* Simplified Header */}
-       <div className="mb-6">
-          <h2 className="text-3xl font-bold text-slate-900 mb-2">{t.history}</h2>
+       <div className="mb-4">
+          <h2 className="text-xl font-bold text-slate-900 mb-1">{t.history}</h2>
           {activeWallet && (
-            <p className="text-base text-slate-600">{activeWallet.name}</p>
+            <p className="text-sm text-slate-600">{activeWallet.name}</p>
           )}
        </div>
 
        {/* Budget Progress Bar - Always visible at top */}
-       <div className="bg-white p-6 rounded-2xl border-2 border-slate-200 mb-6">
-          <div className="flex justify-between items-center mb-4">
-             <p className="text-base font-semibold text-slate-600">{t.monthlyBudget}</p>
-             <span className={`px-3 py-1 rounded-lg text-sm font-semibold ${isOverBudget ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                 {isOverBudget ? t.budgetAlert : t.budgetGood}
-             </span>
+       <div className="bg-white p-4 rounded-xl border border-slate-200 mb-4">
+          <div className="mb-3">
+             <p className="text-sm font-medium text-slate-600">{t.monthlyBudget}</p>
           </div>
-          <div className="flex items-baseline gap-2 mb-4">
-             <span className="text-3xl font-bold text-slate-900">{currencySymbol} {currentMonthSpending.toLocaleString()}</span>
-             <span className="text-lg text-slate-500">/ {budget.toLocaleString()}</span>
+          <div className="flex items-baseline gap-1.5 mb-3">
+             <span className="text-2xl font-bold text-slate-900">{currencySymbol} {currentMonthSpending.toLocaleString()}</span>
+             <span className="text-base text-slate-500">/ {budget.toLocaleString()}</span>
           </div>
-          <div className="h-3 w-full bg-slate-100 rounded-full overflow-hidden">
+          <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
               <div 
                 className={`h-full rounded-full ${isOverBudget ? 'bg-rose-600' : 'bg-emerald-600'}`} 
                 style={{ width: `${budgetProgress}%` }} 
@@ -219,44 +241,54 @@ const History: React.FC = () => {
 
 
        {/* Simplified Filters - Single row with pills */}
-       <div className="mb-6 flex items-center gap-3 flex-wrap">
+       <div className="mb-4 flex items-center gap-2 flex-wrap">
            {/* Search Button */}
            <button
                onClick={() => setShowSearch(!showSearch)}
-               className="w-12 h-12 bg-white border-2 border-slate-200 rounded-xl flex items-center justify-center active:scale-95"
+               className="w-10 h-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center active:scale-95"
                aria-label="Search"
            >
-               <Search size={20} className="text-slate-600" />
+               <Search size={18} className="text-slate-600" />
            </button>
            
            {/* Date Filter Pills */}
            <div className="flex gap-2 flex-1">
                <button
                    onClick={() => setDateFilter('today')}
-                   className={`px-5 py-3 rounded-xl text-base font-semibold active:scale-95 ${
+                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
                        dateFilter === 'today' 
                            ? 'bg-emerald-600 text-white' 
-                           : 'bg-white border-2 border-slate-200 text-slate-700'
+                           : 'bg-white border border-slate-200 text-slate-700'
                    }`}
                >
                    Today
                </button>
                <button
+                   onClick={() => setDateFilter('yesterday')}
+                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
+                       dateFilter === 'yesterday' 
+                           ? 'bg-emerald-600 text-white' 
+                           : 'bg-white border border-slate-200 text-slate-700'
+                   }`}
+               >
+                   {t.yesterday}
+               </button>
+               <button
                    onClick={() => setDateFilter('thisMonth')}
-                   className={`px-5 py-3 rounded-xl text-base font-semibold active:scale-95 ${
+                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
                        dateFilter === 'thisMonth' 
                            ? 'bg-emerald-600 text-white' 
-                           : 'bg-white border-2 border-slate-200 text-slate-700'
+                           : 'bg-white border border-slate-200 text-slate-700'
                    }`}
                >
                    Month
                </button>
                <button
                    onClick={() => setDateFilter('all')}
-                   className={`px-5 py-3 rounded-xl text-base font-semibold active:scale-95 ${
+                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
                        dateFilter === 'all' 
                            ? 'bg-emerald-600 text-white' 
-                           : 'bg-white border-2 border-slate-200 text-slate-700'
+                           : 'bg-white border border-slate-200 text-slate-700'
                    }`}
                >
                    All
@@ -266,48 +298,53 @@ const History: React.FC = () => {
        
        {/* Search Input - Show when toggled */}
        {showSearch && (
-           <div className="mb-4 relative">
-               <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" size={20} />
+           <div className="mb-3 relative">
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                <input 
                    type="text" 
                    placeholder={t.searchPlaceholder} 
                    value={searchTerm}
                    onChange={e => setSearchTerm(e.target.value)}
-                   className="w-full pl-12 pr-12 py-4 bg-white border-2 border-slate-200 rounded-xl text-base font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                   className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
                    autoFocus
                />
                <button
                    onClick={() => { setShowSearch(false); setSearchTerm(''); }}
-                   className="absolute right-4 top-1/2 -translate-y-1/2 p-2 text-slate-400 active:scale-95"
+                   className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 active:scale-95"
                >
-                   <X size={20} />
+                   <X size={18} />
                </button>
            </div>
        )}
        
+       {/* Balance Summary - Only for group wallets */}
+       {activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1 && (
+         <BalanceSummary onSettle={markSettlement} />
+       )}
+       
        {/* Simplified Summary Bar */}
-       <div className="bg-white rounded-2xl p-5 border-2 border-slate-200 mb-6">
+       <div className="bg-white rounded-xl p-3 border border-slate-200 mb-4">
            <div className="flex justify-center items-center">
                <div className="text-center">
-                   <p className="text-xs font-medium text-slate-500 mb-1">Total Spent</p>
-                   <p className="text-2xl font-bold text-slate-900">{currencySymbol} {summary.total.toLocaleString()}</p>
+                   <p className="text-xs font-medium text-slate-500 mb-0.5">Total Spent</p>
+                   <p className="text-xl font-bold text-slate-900">{currencySymbol} {summary.total.toLocaleString()}</p>
                </div>
            </div>
        </div>
        
        {/* Simplified Analytics - Hidden by default */}
        {showAnalytics && dynamicStats.categoryData.length > 0 && !showAnalyticsDetails && (
-           <div className="mb-6">
+           <div className="mb-4">
                <button
                    onClick={() => setShowAnalyticsDetails(true)}
-                   className="w-full bg-white rounded-2xl p-5 border-2 border-slate-200 text-left active:scale-95"
+                   className="w-full bg-white rounded-xl p-3 border border-slate-200 text-left active:scale-95"
                >
                    <div className="flex justify-between items-center">
                        <div>
-                           <p className="text-base font-semibold text-slate-900 mb-1">View Analytics</p>
-                           <p className="text-sm text-slate-500">See spending breakdown</p>
+                           <p className="text-sm font-medium text-slate-900 mb-0.5">View Analytics</p>
+                           <p className="text-xs text-slate-500">See spending breakdown</p>
                        </div>
-                       <TrendingUp size={20} className="text-slate-400" />
+                       <TrendingUp size={18} className="text-slate-400" />
                    </div>
                </button>
            </div>
@@ -315,32 +352,32 @@ const History: React.FC = () => {
        
        {/* Detailed Analytics - Shown when expanded */}
        {showAnalytics && showAnalyticsDetails && dynamicStats.categoryData.length > 0 && (
-           <div className="mb-6 space-y-4">
+           <div className="mb-4 space-y-3">
                <div className="flex justify-between items-center">
-                   <h3 className="text-lg font-semibold text-slate-900">Analytics</h3>
+                   <h3 className="text-base font-semibold text-slate-900">Analytics</h3>
                    <button
                        onClick={() => setShowAnalyticsDetails(false)}
-                       className="p-2 text-slate-400 active:scale-95"
+                       className="p-1.5 text-slate-400 active:scale-95"
                    >
-                       <X size={20} />
+                       <X size={18} />
                    </button>
                </div>
                
                {/* Top Categories - Simple List */}
-               <div className="bg-white rounded-2xl p-5 border-2 border-slate-200">
-                   <h4 className="text-base font-semibold text-slate-900 mb-4">Top Categories</h4>
-                   <div className="space-y-3">
+               <div className="bg-white rounded-xl p-3 border border-slate-200">
+                   <h4 className="text-sm font-semibold text-slate-900 mb-3">Top Categories</h4>
+                   <div className="space-y-2">
                        {dynamicStats.categoryData.slice(0, 5).map((item, index) => {
                            const percent = dynamicStats.filteredExpense > 0 ? ((item.value / dynamicStats.filteredExpense) * 100).toFixed(0) : '0';
                            return (
                                <div key={index} className="flex items-center justify-between">
-                                   <div className="flex items-center gap-3 flex-1">
-                                       <span className="text-2xl">{item.emoji}</span>
-                                       <span className="text-base font-medium text-slate-900">{item.name}</span>
+                                   <div className="flex items-center gap-2 flex-1">
+                                       <span className="text-xl">{item.emoji}</span>
+                                       <span className="text-sm font-medium text-slate-900">{item.name}</span>
                                    </div>
                                    <div className="text-right">
-                                       <p className="text-base font-bold text-slate-900">{currencySymbol} {item.value.toLocaleString()}</p>
-                                       <p className="text-sm text-slate-500">{percent}%</p>
+                                       <p className="text-sm font-bold text-slate-900">{currencySymbol} {item.value.toLocaleString()}</p>
+                                       <p className="text-xs text-slate-500">{percent}%</p>
                                    </div>
                                </div>
                            );
@@ -353,44 +390,62 @@ const History: React.FC = () => {
 
        {/* Simplified Transaction List */}
        {Object.keys(grouped).length > 0 ? (
-         <div className="space-y-6">
+         <div className="space-y-4">
            {Object.keys(grouped).map(dateStr => {
                const enDate = getDateHeader(dateStr);
                return (
-               <div key={dateStr} className="space-y-3">
-                   <h3 className="text-base font-semibold text-slate-700 px-1">{enDate}</h3>
+               <div key={dateStr} className="space-y-2">
+                   <h3 className="text-sm font-semibold text-slate-700 px-1">{enDate}</h3>
                    
-                   <div className="space-y-2">
+                   <div className="space-y-1.5">
                        {grouped[dateStr].map((item) => {
                            return (
                            <div 
                               key={item.id} 
                               onClick={() => setEditingExpense(item)}
-                              className="bg-white p-4 rounded-2xl border-2 border-slate-200 flex items-center gap-4 active:scale-95 cursor-pointer"
+                              className="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-3 active:scale-95 cursor-pointer"
                            >
-                               <div className="w-14 h-14 rounded-xl flex items-center justify-center text-2xl flex-shrink-0 bg-slate-50">
+                               <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0 bg-slate-50 relative">
                                    {item.categoryEmoji}
+                                   {item.splitDetails && (
+                                     <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-600 rounded-full flex items-center justify-center">
+                                       <Users size={10} className="text-white" />
+                                     </div>
+                                   )}
                                </div>
                                <div className="flex-1 min-w-0">
-                                   <div className="flex justify-between items-start mb-1">
-                                       <h4 className="text-base font-semibold text-slate-900 truncate">{item.categoryName}</h4>
-                                       <span className="text-base font-bold whitespace-nowrap ml-2 text-slate-900">
+                                   <div className="flex justify-between items-start mb-0.5">
+                                       <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                           <h4 className="text-sm font-semibold text-slate-900 truncate">{item.categoryName}</h4>
+                                           {item.splitDetails && (
+                                             <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded flex-shrink-0">
+                                               Split
+                                             </span>
+                                           )}
+                                       </div>
+                                       <span className="text-sm font-bold whitespace-nowrap ml-2 text-slate-900">
                                             {currencySymbol} {item.amount.toLocaleString()}
                                        </span>
                                    </div>
                                    {item.note && (
-                                       <p className="text-sm text-slate-500 truncate">{item.note}</p>
+                                       <p className="text-xs text-slate-500 truncate">{item.note}</p>
                                    )}
-                                   {isGroupWallet && item.createdBy?.name && (
-                                       <p className="text-xs text-slate-400 mt-1">{t.addedBy} {item.createdBy.name}</p>
+                                   {item.splitDetails && (
+                                       <p className="text-[10px] text-slate-400 mt-0.5">
+                                         Paid by {item.splitDetails.participants.find(p => p.userId === item.splitDetails?.paidBy)?.userName || 'Unknown'} • 
+                                         Split among {item.splitDetails.participants.length} {item.splitDetails.participants.length === 1 ? 'person' : 'people'}
+                                       </p>
+                                   )}
+                                   {isGroupWallet && item.createdBy?.name && !item.splitDetails && (
+                                       <p className="text-[10px] text-slate-400 mt-0.5">{t.addedBy} {item.createdBy.name}</p>
                                    )}
                                </div>
                                <button 
                                   onClick={(e) => { e.stopPropagation(); deleteExpense(item.id); }}
-                                  className="p-2 text-slate-400 active:scale-95 flex-shrink-0"
+                                  className="p-1.5 text-slate-400 active:scale-95 flex-shrink-0"
                                   aria-label="Delete"
                                >
-                                   <Trash2 size={18} />
+                                   <Trash2 size={16} />
                                </button>
                            </div>
                            );
@@ -401,12 +456,12 @@ const History: React.FC = () => {
            })}
          </div>
        ) : (
-         <div className="text-center py-20 flex flex-col items-center">
-           <div className="w-24 h-24 bg-slate-100 rounded-full flex items-center justify-center mb-6">
-                <Search size={40} className="text-slate-400" />
+         <div className="text-center py-12 flex flex-col items-center">
+           <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                <Search size={32} className="text-slate-400" />
            </div>
-           <p className="text-lg font-semibold text-slate-600 mb-2">No transactions found</p>
-           <p className="text-base text-slate-500">Try adjusting your filters</p>
+           <p className="text-base font-semibold text-slate-600 mb-1">No transactions found</p>
+           <p className="text-sm text-slate-500">Try adjusting your filters</p>
          </div>
        )}
 
@@ -416,6 +471,7 @@ const History: React.FC = () => {
          isOpen={!!editingExpense}
          onClose={() => setEditingExpense(null)}
        />
+      </div>
     </div>
   );
 };

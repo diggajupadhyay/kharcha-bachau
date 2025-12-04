@@ -5,7 +5,17 @@ service cloud.firestore {
     // Users Collection
     // Users can only read/write their own user document
     match /users/{userId} {
-      allow read, write: if request.auth != null && request.auth.uid == userId;
+      // Allow read and create of own user document
+      allow read, create: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow full write (update/delete) of own user document
+      allow write: if request.auth != null && request.auth.uid == userId;
+      
+      // Allow updating customCategories field specifically
+      allow update: if request.auth != null && 
+                      request.auth.uid == userId &&
+                      request.resource.data.diff(resource.data).affectedKeys().hasOnly(['customCategories']) &&
+                      request.resource.data.customCategories is list;
     }
 
     // Wallets Collection
@@ -93,8 +103,8 @@ service cloud.firestore {
 
         // Validate new expense data on creation
         function isValidExpenseCreate() {
-          return request.resource.data.keys().hasAll(['id', 'walletId', 'categoryId', 'categoryName', 'categoryEmoji', 'amount', 'note', 'date', 'createdBy', 'createdAt']) &&
-                 request.resource.data.id == expenseId &&
+          let hasRequiredFields = request.resource.data.keys().hasAll(['id', 'walletId', 'categoryId', 'categoryName', 'categoryEmoji', 'amount', 'note', 'date', 'createdBy', 'createdAt']);
+          let basicValidation = request.resource.data.id == expenseId &&
                  request.resource.data.walletId == walletId &&
                  request.resource.data.categoryId is string && request.resource.data.categoryId.size() > 0 &&
                  request.resource.data.categoryName is string && request.resource.data.categoryName.size() > 0 &&
@@ -105,6 +115,17 @@ service cloud.firestore {
                  request.resource.data.createdBy.uid == request.auth.uid &&
                  request.resource.data.createdBy.name is string && request.resource.data.createdBy.name.size() > 0 &&
                  request.resource.data.createdAt is number;
+          
+          // Validate splitDetails if present (must be valid if it exists, or can be absent)
+          let splitDetailsValid = !('splitDetails' in request.resource.data) || 
+            (request.resource.data.splitDetails.keys().hasAll(['splitType', 'participants', 'paidBy']) &&
+             (request.resource.data.splitDetails.splitType == 'equal' || request.resource.data.splitDetails.splitType == 'percentage' || request.resource.data.splitDetails.splitType == 'custom') &&
+             request.resource.data.splitDetails.participants is list && request.resource.data.splitDetails.participants.size() > 0 &&
+             request.resource.data.splitDetails.paidBy is string && request.resource.data.splitDetails.paidBy.size() > 0 &&
+             request.resource.data.splitDetails.paidBy in getWallet().members &&
+             (!('settlements' in request.resource.data.splitDetails) || (request.resource.data.splitDetails.settlements is list)));
+          
+          return hasRequiredFields && basicValidation && splitDetailsValid;
         }
 
         // Validate updated expense data
@@ -112,13 +133,25 @@ service cloud.firestore {
           let incomingData = request.resource.data;
           let existingData = resource.data;
 
-          // Only amount and note can be updated
-          let allowedFields = ['amount', 'note'];
+          // Only amount, note, and splitDetails can be updated
+          let allowedFields = ['amount', 'note', 'splitDetails'];
           let affectedKeys = incomingData.diff(existingData).affectedKeys();
 
-          return affectedKeys.hasOnly(allowedFields) &&
+          let basicValidation = affectedKeys.hasOnly(allowedFields) &&
                  (incomingData.amount is number && incomingData.amount > 0) &&
                  (incomingData.note is string);
+          
+          // Validate splitDetails if being updated (can be null to remove, or must be valid)
+          let splitDetailsValid = !('splitDetails' in affectedKeys) ||
+            (incomingData.splitDetails == null) ||
+            (incomingData.splitDetails.keys().hasAll(['splitType', 'participants', 'paidBy']) &&
+             (incomingData.splitDetails.splitType == 'equal' || incomingData.splitDetails.splitType == 'percentage' || incomingData.splitDetails.splitType == 'custom') &&
+             incomingData.splitDetails.participants is list && incomingData.splitDetails.participants.size() > 0 &&
+             incomingData.splitDetails.paidBy is string && incomingData.splitDetails.paidBy.size() > 0 &&
+             incomingData.splitDetails.paidBy in getWallet().members &&
+             (!('settlements' in incomingData.splitDetails) || (incomingData.splitDetails.settlements is list)));
+          
+          return basicValidation && splitDetailsValid;
         }
 
         // Allow create if user is a member and expense data is valid
@@ -128,9 +161,19 @@ service cloud.firestore {
         allow read: if isWalletMember();
         
         // Allow update if user is a member AND (created the expense OR is wallet owner) AND update is valid
-        allow update: if isWalletMember() && 
-                        (isExpenseCreator() || isWalletOwner()) && 
-                        isValidExpenseUpdate();
+        // OR if updating only splitDetails.settlements (any member can mark settlements for their own debts)
+        allow update: if isWalletMember() && (
+                        ((isExpenseCreator() || isWalletOwner()) && isValidExpenseUpdate()) ||
+                        // Allow any member to update splitDetails.settlements (to mark their own payments)
+                        (request.resource.data.diff(resource.data).affectedKeys().hasOnly(['splitDetails']) &&
+                         request.resource.data.splitDetails != null &&
+                         resource.data.splitDetails != null &&
+                         // Validate that only settlements array is being added to
+                         request.resource.data.splitDetails.keys().hasAll(['splitType', 'participants', 'paidBy']) &&
+                         request.resource.data.splitDetails.settlements is list &&
+                         resource.data.splitDetails.settlements is list &&
+                         request.resource.data.splitDetails.settlements.size() >= resource.data.splitDetails.settlements.size())
+                      );
         
         // Allow delete if user is a member AND (created the expense OR is wallet owner)
         allow delete: if isWalletMember() && 

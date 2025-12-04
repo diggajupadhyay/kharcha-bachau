@@ -1,11 +1,12 @@
 
 import { db } from './firebase';
-import { User, Expense, Wallet } from '../types';
+import { User, Expense, Wallet, Category } from '../types';
 import { format } from 'date-fns';
 import firebase from 'firebase/compat/app';
 
 const GUEST_DATA_KEY = 'daily_expenses_guest_v1';
 const MONTHLY_BUDGET_KEY = 'daily_expenses_budget_monthly';
+const GUEST_CATEGORIES_KEY = 'kharcha_bachau_custom_categories_guest';
 
 // --- Wallet Management ---
 
@@ -451,6 +452,21 @@ const saveLocalData = (data: Expense[]) => {
 export const addExpense = async (user: User, activeWalletId: string, expense: Omit<Expense, 'id' | 'createdAt' | 'walletId' | 'createdBy'>) => {
     if (isNaN(expense.amount) || expense.amount < 0) throw new Error("Invalid amount");
 
+    // Validate split details if provided
+    if (expense.splitDetails) {
+        const { splitType, participants, paidBy } = expense.splitDetails;
+        if (!paidBy || !participants || participants.length === 0) {
+            throw new Error("Invalid split details");
+        }
+        
+        // Validate split amounts add up
+        const totalSplit = participants.reduce((sum, p) => sum + p.amount, 0);
+        const tolerance = 0.01; // Allow small rounding differences
+        if (Math.abs(totalSplit - expense.amount) > tolerance) {
+            throw new Error(`Split amounts (${totalSplit}) don't match total (${expense.amount})`);
+        }
+    }
+
     const newExpense: Expense = {
         ...expense,
         id: crypto.randomUUID(),
@@ -498,10 +514,11 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
 export const updateExpense = async (user: User, activeWalletId: string, expenseId: string, updates: Partial<Expense>) => {
     if (updates.amount !== undefined && (isNaN(updates.amount) || updates.amount < 0)) throw new Error("Invalid amount");
 
-    // Filter updates to only allow fields permitted by Firestore rules: amount, note
+    // Filter updates to only allow fields permitted by Firestore rules: amount, note, splitDetails
     const allowedUpdates: Partial<Expense> = {};
     if (updates.amount !== undefined) allowedUpdates.amount = updates.amount;
     if (updates.note !== undefined) allowedUpdates.note = updates.note;
+    if (updates.splitDetails !== undefined) allowedUpdates.splitDetails = updates.splitDetails;
 
     if (user.type === 'guest') {
         const current = getLocalData();
@@ -534,6 +551,74 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
             }
             
             throw new Error('Failed to update expense. Please try again.');
+        }
+    }
+};
+
+// --- Custom Categories Management ---
+
+export const getCustomCategories = async (user: User): Promise<Category[]> => {
+    if (user.type === 'guest') {
+        try {
+            const saved = localStorage.getItem(GUEST_CATEGORIES_KEY);
+            return saved ? JSON.parse(saved) : [];
+        } catch {
+            return [];
+        }
+    } else {
+        try {
+            const userDoc = await db.collection('users').doc(user.id).get();
+            if (userDoc.exists) {
+                const data = userDoc.data();
+                return data?.customCategories || [];
+            } else {
+                // Create user document if it doesn't exist
+                await db.collection('users').doc(user.id).set({
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    customCategories: [],
+                    createdAt: Date.now()
+                });
+                return [];
+            }
+        } catch (error: any) {
+            if (import.meta.env.DEV) {
+                console.error('Error fetching custom categories:', error);
+            }
+            return [];
+        }
+    }
+};
+
+export const saveCustomCategories = async (user: User, categories: Category[]): Promise<void> => {
+    if (user.type === 'guest') {
+        localStorage.setItem(GUEST_CATEGORIES_KEY, JSON.stringify(categories));
+    } else {
+        try {
+            const userDoc = await db.collection('users').doc(user.id).get();
+            if (userDoc.exists) {
+                await db.collection('users').doc(user.id).update({
+                    customCategories: categories
+                });
+            } else {
+                // Create user document if it doesn't exist
+                await db.collection('users').doc(user.id).set({
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                    customCategories: categories,
+                    createdAt: Date.now()
+                });
+            }
+            if (import.meta.env.DEV) {
+                console.log('Custom categories saved to Firestore');
+            }
+        } catch (error: any) {
+            if (import.meta.env.DEV) {
+                console.error('Error saving custom categories:', error);
+            }
+            throw new Error('Failed to save custom categories');
         }
     }
 };

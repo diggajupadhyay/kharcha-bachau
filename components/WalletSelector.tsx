@@ -75,100 +75,106 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
   };
 
   return (
-    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center pointer-events-none">
+    <div className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center pointer-events-none overflow-x-hidden">
        <div 
         className="absolute inset-0 bg-slate-900/60 pointer-events-auto"
         onClick={onClose}
       />
       
-      <div className="bg-white w-full sm:max-w-md rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl pointer-events-auto relative">
+      <div 
+        className="bg-white w-full sm:max-w-md rounded-t-xl sm:rounded-xl p-4 shadow-2xl pointer-events-auto relative max-w-full overflow-y-auto max-h-[90vh]"
+        style={{
+          paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
+          paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))'
+        }}
+      >
           
-          <div className="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-6" />
+          <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-4" />
 
-          <div className="flex justify-between items-center mb-8">
-              <h2 className="text-2xl font-bold text-slate-900">
+          <div className="flex justify-between items-center mb-4">
+              <h2 className="text-lg font-bold text-slate-900">
                   {mode === 'select' ? t.myWallets : mode === 'create' ? t.createWallet : 'Join Wallet'}
               </h2>
               {mode !== 'select' && (
-                  <button onClick={() => setMode('select')} className="p-2 bg-slate-100 rounded-xl active:scale-95">
-                      <X size={24} className="text-slate-600"/>
+                  <button onClick={() => setMode('select')} className="p-1.5 bg-slate-100 rounded-lg active:scale-95">
+                      <X size={18} className="text-slate-600"/>
                   </button>
               )}
           </div>
 
           {mode === 'select' ? (
-              <div className="space-y-3">
+              <div className="space-y-2">
                   {wallets.map(wallet => {
                     const inviteCode = inviteCodes[wallet.id];
                     const isGroupWallet = !wallet.isPersonal && wallet.id !== 'guest_wallet';
                     
                     return (
-                      <div key={wallet.id} className="space-y-2">
+                      <div key={wallet.id} className="space-y-1.5">
                         <button
                           onClick={() => {
                             switchWallet(wallet.id);
                             onClose();
                           }}
-                          className={`w-full p-5 rounded-2xl flex items-center justify-between border-2 active:scale-95 ${activeWallet?.id === wallet.id ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200'}`}
+                          className={`w-full p-3 rounded-xl flex items-center justify-between border active:scale-95 ${activeWallet?.id === wallet.id ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200'}`}
                         >
-                          <div className="flex items-center gap-4 flex-1">
-                            <div className={`p-3 rounded-xl ${activeWallet?.id === wallet.id ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                              <Wallet size={24} />
+                          <div className="flex items-center gap-3 flex-1">
+                            <div className={`p-2 rounded-lg ${activeWallet?.id === wallet.id ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                              <Wallet size={18} />
                             </div>
                             <div className="text-left flex-1 min-w-0">
-                              <div className="flex items-center gap-2 mb-1">
-                                <p className={`text-lg font-semibold truncate ${activeWallet?.id === wallet.id ? 'text-slate-900' : 'text-slate-700'}`}>{wallet.name}</p>
+                              <div className="flex items-center gap-1.5 mb-0.5">
+                                <p className={`text-sm font-medium truncate ${activeWallet?.id === wallet.id ? 'text-slate-900' : 'text-slate-700'}`}>{wallet.name}</p>
                                 {wallet.isPersonal && (
-                                  <span className="text-xs font-semibold bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full flex-shrink-0">Personal</span>
+                                  <span className="text-[10px] font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded flex-shrink-0">Personal</span>
                                 )}
                               </div>
-                              <p className="text-base text-slate-500">{wallet.members.length} member{wallet.members.length > 1 ? 's' : ''}</p>
+                              <p className="text-xs text-slate-500">{wallet.members.length} member{wallet.members.length > 1 ? 's' : ''}</p>
                               {isGroupWallet && inviteCode && (
-                                <div className="flex items-center gap-2 mt-2">
-                                  <p className="text-sm text-indigo-600 font-semibold">Code: {inviteCode}</p>
+                                <div className="flex items-center gap-1.5 mt-1">
+                                  <p className="text-xs text-indigo-600 font-medium">Code: {inviteCode}</p>
                                   <button
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleCopyInviteCode(inviteCode, wallet.name);
                                     }}
-                                    className="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-lg active:scale-95 flex items-center justify-center"
+                                    className="w-7 h-7 bg-indigo-100 text-indigo-600 rounded active:scale-95 flex items-center justify-center"
                                     title="Copy invite code"
                                   >
-                                    <Share2 size={16} />
+                                    <Share2 size={14} />
                                   </button>
                                 </div>
                               )}
                             </div>
                           </div>
-                          {activeWallet?.id === wallet.id && <Check size={24} className="text-emerald-600 flex-shrink-0" />}
+                          {activeWallet?.id === wallet.id && <Check size={18} className="text-emerald-600 flex-shrink-0" />}
                         </button>
                       </div>
                     );
                   })}
                   
                   {user?.type === 'user' && (
-                    <div className="grid grid-cols-2 gap-4 mt-6">
+                    <div className="grid grid-cols-2 gap-2 mt-4">
                         <button 
                             onClick={() => setMode('create')}
-                            className="p-5 border-2 border-dashed border-slate-300 rounded-2xl text-slate-600 font-semibold flex flex-col items-center justify-center gap-3 active:scale-95"
+                            className="p-3 border border-dashed border-slate-300 rounded-xl text-slate-600 font-medium flex flex-col items-center justify-center gap-2 active:scale-95"
                         >
-                            <Plus size={24} />
-                            <span className="text-base">{t.create}</span>
+                            <Plus size={18} />
+                            <span className="text-sm">{t.create}</span>
                         </button>
                         <button 
                             onClick={() => setMode('join')}
-                            className="p-5 border-2 border-dashed border-slate-300 rounded-2xl text-slate-600 font-semibold flex flex-col items-center justify-center gap-3 active:scale-95"
+                            className="p-3 border border-dashed border-slate-300 rounded-xl text-slate-600 font-medium flex flex-col items-center justify-center gap-2 active:scale-95"
                         >
-                            <Users size={24} />
-                            <span className="text-base">Join</span>
+                            <Users size={18} />
+                            <span className="text-sm">Join</span>
                         </button>
                     </div>
                   )}
               </div>
           ) : (
-              <form onSubmit={handleSubmit} className="space-y-6">
+              <form onSubmit={handleSubmit} className="space-y-4">
                   <div>
-                      <label className="text-base font-semibold text-slate-700 block mb-3">
+                      <label className="text-sm font-medium text-slate-700 block mb-2">
                           {mode === 'create' ? t.walletName : 'Invite Code'}
                       </label>
                       <input 
@@ -177,13 +183,13 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
                         onChange={(e) => setInputValue(e.target.value)}
                         placeholder={mode === 'create' ? "e.g. Home Expenses" : "e.g. HK-1234"}
                         autoFocus
-                        className="w-full bg-white border-2 border-slate-200 p-5 rounded-2xl text-lg font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                        className="w-full bg-white border border-slate-200 p-3 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500"
                       />
                   </div>
                   <button 
                     type="submit"
                     disabled={isLoading}
-                    className="w-full py-5 bg-emerald-600 text-white rounded-2xl text-lg font-semibold active:scale-95 disabled:opacity-50"
+                    className="w-full py-3 bg-emerald-600 text-white rounded-xl text-sm font-medium active:scale-95 disabled:opacity-50"
                   >
                       {isLoading ? 'Processing...' : (mode === 'create' ? t.create : 'Join Wallet')}
                   </button>
