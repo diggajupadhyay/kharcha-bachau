@@ -12,7 +12,7 @@ import { getCurrencySymbol } from '../utils/currencyFormatter';
 
 
 const History: React.FC = () => {
-  const { language, country, expenses, deleteExpense, budget, monthlyStats, pieChartData, activeWallet, markSettlement } = useStore();
+  const { language, expenses, deleteExpense, budget, monthlyStats, pieChartData, activeWallet, markSettlement } = useStore();
   const { user } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
@@ -31,7 +31,7 @@ const History: React.FC = () => {
   // Memoize translations
   const t = useMemo(() => TRANSLATIONS[language], [language]);
   const isGuest = useMemo(() => user?.type === 'guest', [user]);
-  const currencySymbol = useMemo(() => getCurrencySymbol(country), [country]);
+  const currencySymbol = useMemo(() => getCurrencySymbol(), []);
 
   // --- Filtering Logic ---
   const filteredExpenses = useMemo(() => {
@@ -62,8 +62,15 @@ const History: React.FC = () => {
         );
     }
 
-    // Sort by createdAt (chronological order - newest first)
-    return filtered.sort((a, b) => b.createdAt - a.createdAt);
+    // Sort by date first (newest dates first), then by createdAt as tiebreaker (newest first)
+    // Create new array to avoid mutating original
+    return [...filtered].sort((a, b) => {
+      const dateComparison = new Date(b.date).getTime() - new Date(a.date).getTime();
+      if (dateComparison === 0) {
+        return (b.createdAt || 0) - (a.createdAt || 0); // Sort by createdAt if dates are the same
+      }
+      return dateComparison;
+    });
   }, [expenses, dateFilter, searchTerm, currentDate]);
 
   const grouped = useMemo(() => {
@@ -74,9 +81,17 @@ const History: React.FC = () => {
       });
       // Sort expenses within each date group by createdAt (newest first)
       Object.keys(groups).forEach(date => {
-          groups[date].sort((a, b) => b.createdAt - a.createdAt);
+          groups[date] = [...groups[date]].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       });
-      return groups;
+      // Sort date groups by date (newest dates first)
+      const sortedDates = [...Object.keys(groups)].sort((a, b) => 
+        new Date(b).getTime() - new Date(a).getTime()
+      );
+      const sortedGroups: Record<string, typeof filteredExpenses> = {};
+      sortedDates.forEach(date => {
+        sortedGroups[date] = groups[date];
+      });
+      return sortedGroups;
   }, [filteredExpenses]);
 
   // Calculate Summary for the filtered view
@@ -476,4 +491,4 @@ const History: React.FC = () => {
   );
 };
 
-export default History;
+export default React.memo(History);

@@ -1,7 +1,6 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { StoreContextType, Expense, Notification, NotificationType, Language, Category, MonthlyStats, PieChartData, Wallet, CountryCode, SplitDetails } from '../types';
-import { DEFAULT_COUNTRY } from '../constants/countries';
+import { StoreContextType, Expense, Notification, NotificationType, Language, Category, MonthlyStats, PieChartData, Wallet, SplitDetails } from '../types';
 import * as storage from '../services/storageService';
 import { useAuth } from './AuthContext';
 import { startOfMonth, subMonths, endOfMonth, format } from 'date-fns';
@@ -11,7 +10,6 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 const ACTIVE_WALLET_KEY = 'kharcha_bachau_active_wallet_id';
 const LANGUAGE_KEY = 'kharcha_bachau_language';
-const COUNTRY_KEY = 'kharcha_bachau_country';
 const CUSTOM_CATEGORIES_KEY = 'kharcha_bachau_custom_categories';
 
 export const useStore = () => {
@@ -28,17 +26,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const saved = localStorage.getItem(LANGUAGE_KEY);
     return (saved === 'en' || saved === 'np') ? saved : 'en';
   });
-  const [country, setCountryState] = useState<CountryCode>(() => {
-    const saved = localStorage.getItem(COUNTRY_KEY);
-    return (saved === 'np' || saved === 'in' || saved === 'au') ? saved : DEFAULT_COUNTRY;
-  });
   
   const setLanguage = useCallback((lang: Language) => {
     setLanguageState(lang);
-  }, []);
-  
-  const setCountry = useCallback((countryCode: CountryCode) => {
-    setCountryState(countryCode);
   }, []);
   
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -48,10 +38,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem(LANGUAGE_KEY, language);
   }, [language]);
   
-  // Persist country to localStorage
+  // Clean up old country key from localStorage
   useEffect(() => {
-    localStorage.setItem(COUNTRY_KEY, country);
-  }, [country]);
+    localStorage.removeItem('kharcha_bachau_country');
+  }, []);
   
   // Wallet State
   const [wallets, setWallets] = useState<Wallet[]>([]);
@@ -455,23 +445,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [user]);
 
   // Save custom categories to Firestore/localStorage
-  useEffect(() => {
-    if (!user || customCategories.length === 0) return;
-    
-    const saveCategories = async () => {
-      try {
-        await storage.saveCustomCategories(user, customCategories);
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.error('Error saving custom categories:', error);
-        }
-      }
-    };
-    
-    // Debounce saves to avoid too many writes
-    const timeoutId = setTimeout(saveCategories, 500);
-    return () => clearTimeout(timeoutId);
-  }, [customCategories, user]);
+  // Note: Categories are now saved explicitly in add/update/delete functions
+  // This useEffect is kept as a backup for edge cases but should rarely trigger
+  // since we explicitly save in each function
 
   // Get all categories (default + custom)
   const getAllCategories = useCallback((): Category[] => {
@@ -493,6 +469,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // Category Management
   const addCustomCategory = useCallback(async (category: Category) => {
+    if (!user) return;
+    
     // Validate category
     if (!category.id || !category.name || !category.emoji) {
       showNotification('error', 'Invalid category data');
@@ -505,12 +483,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     
-    setCustomCategoriesState(prev => [...prev, category]);
-    showNotification('success', 'Category added');
-    triggerHaptic();
-  }, [customCategories, showNotification, triggerHaptic]);
+    try {
+      const updatedCategories = [...customCategories, category];
+      setCustomCategoriesState(updatedCategories);
+      await storage.saveCustomCategories(user, updatedCategories);
+      showNotification('success', 'Category added');
+      triggerHaptic();
+    } catch (error: any) {
+      showNotification('error', error.message || 'Failed to save category');
+      if (import.meta.env.DEV) {
+        console.error('Error adding category:', error);
+      }
+    }
+  }, [user, customCategories, showNotification, triggerHaptic]);
 
   const updateCustomCategory = useCallback(async (categoryId: string, updates: Partial<Category>) => {
+    if (!user) return;
+    
     const category = customCategories.find(c => c.id === categoryId);
     if (!category) {
       showNotification('error', 'Category not found');
@@ -523,14 +512,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     
-    setCustomCategoriesState(prev => prev.map(c => 
-      c.id === categoryId ? { ...c, ...updates } : c
-    ));
-    showNotification('success', 'Category updated');
-    triggerHaptic();
-  }, [customCategories, showNotification, triggerHaptic]);
+    try {
+      const updatedCategories = customCategories.map(c => 
+        c.id === categoryId ? { ...c, ...updates } : c
+      );
+      setCustomCategoriesState(updatedCategories);
+      await storage.saveCustomCategories(user, updatedCategories);
+      showNotification('success', 'Category updated');
+      triggerHaptic();
+    } catch (error: any) {
+      showNotification('error', error.message || 'Failed to update category');
+      if (import.meta.env.DEV) {
+        console.error('Error updating category:', error);
+      }
+    }
+  }, [user, customCategories, showNotification, triggerHaptic]);
 
   const deleteCustomCategory = useCallback(async (categoryId: string) => {
+    if (!user) return;
+    
     // Can't delete default categories
     if (EXPENSE_CATEGORIES.find(c => c.id === categoryId)) {
       showNotification('error', 'Cannot delete default categories');
@@ -544,10 +544,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     
-    setCustomCategoriesState(prev => prev.filter(c => c.id !== categoryId));
-    showNotification('success', 'Category deleted');
-    triggerHaptic();
-  }, [expenses, showNotification, triggerHaptic]);
+    try {
+      const updatedCategories = customCategories.filter(c => c.id !== categoryId);
+      setCustomCategoriesState(updatedCategories);
+      await storage.saveCustomCategories(user, updatedCategories);
+      showNotification('success', 'Category deleted');
+      triggerHaptic();
+    } catch (error: any) {
+      showNotification('error', error.message || 'Failed to delete category');
+      if (import.meta.env.DEV) {
+        console.error('Error deleting category:', error);
+      }
+    }
+  }, [user, customCategories, expenses, showNotification, triggerHaptic]);
 
   const markSettlement = useCallback(async (expenseId: string, fromUserId: string, toUserId: string) => {
     if (!user || !activeWallet) return;
@@ -612,7 +621,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const contextValue = useMemo(() => ({
     language, setLanguage,
-    country, setCountry,
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
     expenses, budget, setBudget, monthlyStats, pieChartData,
     addExpense, updateExpense, deleteExpense, setExpenses,
@@ -621,7 +629,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     notifications, showNotification, dismissNotification, triggerHaptic
   }), [
     language, setLanguage,
-    country, setCountry,
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
     expenses, budget, setBudget, monthlyStats, pieChartData,
     addExpense, updateExpense, deleteExpense,

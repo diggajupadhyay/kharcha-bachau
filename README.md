@@ -1,4 +1,4 @@
-# Kharcha Bachau v1.0 - Smart Expense Tracker 🇳🇵
+# Kharcha Bachau v0.4-beta - Smart Expense Tracker 🇳🇵
 
 **App Name:** Kharcha Bachau (खर्च बचाउ)  
 **Status:** Production Ready / Free  

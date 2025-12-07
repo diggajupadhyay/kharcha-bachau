@@ -116,8 +116,9 @@ service cloud.firestore {
                  request.resource.data.createdBy.name is string && request.resource.data.createdBy.name.size() > 0 &&
                  request.resource.data.createdAt is number;
           
-          // Validate splitDetails if present (must be valid if it exists, or can be absent)
+          // Validate splitDetails if present (must be valid if it exists, or can be absent/null)
           let splitDetailsValid = !('splitDetails' in request.resource.data) || 
+            request.resource.data.splitDetails == null ||
             (request.resource.data.splitDetails.keys().hasAll(['splitType', 'participants', 'paidBy']) &&
              (request.resource.data.splitDetails.splitType == 'equal' || request.resource.data.splitDetails.splitType == 'percentage' || request.resource.data.splitDetails.splitType == 'custom') &&
              request.resource.data.splitDetails.participants is list && request.resource.data.splitDetails.participants.size() > 0 &&

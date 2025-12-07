@@ -14,7 +14,7 @@ interface AddExpenseModalProps {
 }
 
 const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onClose }) => {
-  const { language, country, addExpense, triggerHaptic, activeWallet, expenses } = useStore();
+  const { language, addExpense, triggerHaptic, activeWallet, expenses } = useStore();
   const { user } = useAuth();
   const [amount, setAmount] = useState('0');
   const [note, setNote] = useState('');
@@ -28,7 +28,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
   const [percentages, setPercentages] = useState<Record<string, string>>({});
   
   const t = TRANSLATIONS[language];
-  const currencySymbol = getCurrencySymbol(country);
+  const currencySymbol = getCurrencySymbol();
   
   // Check if this is a group wallet
   const isGroupWallet = useMemo(() => {

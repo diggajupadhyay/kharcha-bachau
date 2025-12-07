@@ -15,6 +15,22 @@ export default defineConfig({
         {
           src: 'sw.js',
           dest: ''
+        },
+        {
+          src: 'public/icon-192.png',
+          dest: ''
+        },
+        {
+          src: 'public/icon-512.png',
+          dest: ''
+        },
+        {
+          src: 'public/icon-180.png',
+          dest: ''
+        },
+        {
+          src: 'public/icon.svg',
+          dest: ''
         }
       ]
     })

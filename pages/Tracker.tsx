@@ -16,7 +16,7 @@ interface TrackerProps {
 
 
 const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
-  const { language, country, triggerHaptic, expenses, monthlyStats, activeWallet, getAllCategories } = useStore();
+  const { language, triggerHaptic, expenses, monthlyStats, activeWallet, getAllCategories } = useStore();
   const { user } = useAuth();
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -25,13 +25,22 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
   
   // Memoize translations and currency symbol
   const t = useMemo(() => TRANSLATIONS[language], [language]);
-  const currencySymbol = useMemo(() => getCurrencySymbol(country), [country]);
+  const currencySymbol = useMemo(() => getCurrencySymbol(), []);
 
   const totalExpenseToday = useMemo(() => {
       return expenses
         .filter(e => e.date === currentDate)
         .reduce((sum, e) => sum + e.amount, 0);
   }, [expenses, currentDate]);
+
+  // Memoize sorted categories to avoid re-sorting on every render
+  const sortedCategories = useMemo(() => {
+    return getAllCategories().sort((a, b) => {
+      const nameA = language === 'en' ? a.name : a.name_np;
+      const nameB = language === 'en' ? b.name : b.name_np;
+      return nameA.localeCompare(nameB);
+    });
+  }, [getAllCategories, language]);
 
   return (
     <div 
@@ -93,13 +102,7 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
            
            <div className="grid grid-cols-3 gap-2.5">
               {/* Expense Categories - Sorted alphabetically (default + custom) */}
-              {getAllCategories()
-                .sort((a, b) => {
-                  const nameA = language === 'en' ? a.name : a.name_np;
-                  const nameB = language === 'en' ? b.name : b.name_np;
-                  return nameA.localeCompare(nameB);
-                })
-                .map(cat => (
+              {sortedCategories.map(cat => (
                   <button
                       key={cat.id}
                       onClick={() => {
@@ -147,4 +150,4 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
   );
 };
 
-export default Tracker;
+export default React.memo(Tracker);

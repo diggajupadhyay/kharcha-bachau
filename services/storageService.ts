@@ -467,8 +467,14 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
         }
     }
 
-    const newExpense: Expense = {
-        ...expense,
+    // Build expense object, omitting splitDetails if undefined
+    const expenseData: any = {
+        categoryId: expense.categoryId,
+        categoryName: expense.categoryName,
+        categoryEmoji: expense.categoryEmoji,
+        amount: expense.amount,
+        note: expense.note,
+        date: expense.date,
         id: crypto.randomUUID(),
         walletId: activeWalletId,
         createdBy: {
@@ -477,6 +483,13 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
         },
         createdAt: Date.now()
     };
+    
+    // Only include splitDetails if it's actually defined
+    if (expense.splitDetails) {
+        expenseData.splitDetails = expense.splitDetails;
+    }
+    
+    const newExpense: Expense = expenseData;
 
     if (user.type === 'guest') {
         const current = getLocalData();
@@ -497,13 +510,22 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
-                console.error('Error saving expense:', error);
+                // Log detailed error information (only in development)
+                console.error('Error saving expense:', {
+                    code: error.code,
+                    message: error.message,
+                    stack: error.stack,
+                    expense: newExpense
+                });
             }
             
             if (error.code === 'permission-denied') {
                 throw new Error('Permission denied. You may not have access to this wallet.');
             } else if (error.code === 'unavailable') {
                 throw new Error('Network error. Please check your connection and try again.');
+            } else if (error.message) {
+                // Include the actual error message for debugging
+                throw new Error(`Failed to save expense: ${error.message}`);
             }
             
             throw new Error('Failed to save expense. Please try again.');
@@ -718,7 +740,7 @@ export const subscribeToWalletExpenses = (walletId: string, callback: (e: Expens
           }
           
           // If index is missing, provide helpful error
-          if (error.code === 'failed-precondition') {
+          if (error.code === 'failed-precondition' && import.meta.env.DEV) {
               console.error('Firestore index required. Please deploy indexes: npm run deploy:indexes');
           }
           

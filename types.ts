@@ -1,6 +1,5 @@
 
 export type Language = 'en' | 'np';
-export type CountryCode = 'np' | 'in' | 'au';
 export type NotificationType = 'success' | 'error' | 'info';
 export type Season = 'basanta' | 'grishma' | 'barsha' | 'sharad' | 'hemanta' | 'shishir' | 'all';
 export type DateRange = 'thisMonth' | 'lastMonth' | 'all';
@@ -109,8 +108,6 @@ export interface PieChartData {
 export interface StoreContextType {
   language: Language;
   setLanguage: (lang: Language) => void;
-  country: CountryCode;
-  setCountry: (country: CountryCode) => void;
   
   // Wallet Management
   wallets: Wallet[];

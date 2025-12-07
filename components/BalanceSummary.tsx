@@ -1,4 +1,4 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useCallback } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { TRANSLATIONS } from '../constants';
@@ -10,21 +10,29 @@ interface BalanceSummaryProps {
 }
 
 const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
-  const { language, country, activeWallet, expenses, getMemberBalances } = useStore();
+  const { language, activeWallet, expenses, getMemberBalances } = useStore();
   const { user } = useAuth();
   
   const t = TRANSLATIONS[language];
-  const currencySymbol = getCurrencySymbol(country);
+  const currencySymbol = getCurrencySymbol();
   
   const balances = useMemo(() => getMemberBalances(), [getMemberBalances]);
   
-  // Get member names
-  const getMemberName = (userId: string): string => {
-    if (userId === user?.id) return user.name;
-    const expense = expenses.find(e => e.createdBy.uid === userId);
-    if (expense) return expense.createdBy.name;
-    return userId.substring(0, 8);
-  };
+  // Memoize member names to avoid repeated lookups
+  const memberNames = useMemo(() => {
+    const names: Record<string, string> = {};
+    if (user) names[user.id] = user.name;
+    expenses.forEach(e => {
+      if (e.createdBy?.uid && !names[e.createdBy.uid]) {
+        names[e.createdBy.uid] = e.createdBy.name;
+      }
+    });
+    return names;
+  }, [user, expenses]);
+
+  const getMemberName = useCallback((userId: string): string => {
+    return memberNames[userId] || userId.substring(0, 8);
+  }, [memberNames]);
   
   // Calculate who owes whom (only unsettled debts)
   const debts = useMemo(() => {

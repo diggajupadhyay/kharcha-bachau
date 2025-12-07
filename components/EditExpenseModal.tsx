@@ -12,12 +12,12 @@ interface EditExpenseModalProps {
 }
 
 const EditExpenseModal: React.FC<EditExpenseModalProps> = ({ expense, isOpen, onClose }) => {
-  const { language, country, updateExpense, expenses } = useStore();
+  const { language, updateExpense, expenses } = useStore();
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   
   const t = TRANSLATIONS[language];
-  const currencySymbol = getCurrencySymbol(country);
+  const currencySymbol = getCurrencySymbol();
   
   // Get member name helper
   const getMemberName = (userId: string): string => {

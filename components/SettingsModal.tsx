@@ -4,14 +4,17 @@ import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { TRANSLATIONS } from '../constants';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
-import { X, LogOut, User, Cloud, Wallet, Download, Globe, ChevronRight, Share2, FileText, Trash2, MapPin, Tag } from 'lucide-react';
+import { X, LogOut, User, Cloud, Wallet, Download, Globe, ChevronRight, Share2, FileText, Trash2, Tag } from 'lucide-react';
 import AuthModal from './AuthModal';
 import WalletSelector from './WalletSelector';
-import CountryPicker from './CountryPicker';
 import LanguagePicker from './LanguagePicker';
 import CategoryManager from './CategoryManager';
 import * as storage from '../services/storageService';
-import { generatePDFReport } from '../services/pdfService';
+// Lazy load PDF service to reduce initial bundle size
+const generatePDFReport = async (expenses: any, monthlyStats: any, title: string) => {
+  const { generatePDFReport: generate } = await import('../services/pdfService');
+  return generate(expenses, monthlyStats, title);
+};
 import { generateCSVExport } from '../services/csvService';
 
 interface SettingsModalProps {
@@ -21,11 +24,10 @@ interface SettingsModalProps {
 }
 
 const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onLogin }) => {
-  const { language, setLanguage, country, setCountry, budget, setBudget, expenses, activeWallet, monthlyStats, leaveWallet, deleteWallet, showNotification, setExpenses, triggerHaptic } = useStore();
+  const { language, setLanguage, budget, setBudget, expenses, activeWallet, monthlyStats, leaveWallet, deleteWallet, showNotification, setExpenses, triggerHaptic } = useStore();
   const { user, logout } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false);
-  const [isCountryPickerOpen, setIsCountryPickerOpen] = useState(false);
   const [isLanguagePickerOpen, setIsLanguagePickerOpen] = useState(false);
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
@@ -48,13 +50,13 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onLogin 
       if (!isNaN(val)) setBudget(val);
   };
 
-  const handlePDF = () => {
+  const handlePDF = async () => {
     if (!expenses.length) {
       showNotification('error', 'No data to export');
       return;
     }
     try {
-      generatePDFReport(expenses, monthlyStats, 'All Time Report');
+      await generatePDFReport(expenses, monthlyStats, 'All Time Report');
       showNotification('success', 'PDF report generated');
     } catch (error) {
       showNotification('error', 'Failed to generate PDF report');
@@ -227,22 +229,6 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onLogin 
                     <ChevronRight size={18} className="text-slate-400" />
                 </button>
 
-                {/* Country */}
-                <button onClick={() => { triggerHaptic(); setIsCountryPickerOpen(true); }} className="w-full bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between active:scale-95">
-                    <div className="flex items-center gap-3">
-                        <MapPin size={18} className="text-slate-600" />
-                        <div className="text-left">
-                            <p className="text-sm font-medium text-slate-900">{language === 'en' ? 'Country' : 'देश'}</p>
-                            <p className="text-xs text-slate-500">
-                                {country === 'np' ? (language === 'en' ? 'Nepal' : 'नेपाल') : 
-                                 country === 'in' ? (language === 'en' ? 'India' : 'भारत') : 
-                                 (language === 'en' ? 'Australia' : 'अस्ट्रेलिया')}
-                            </p>
-                        </div>
-                    </div>
-                    <ChevronRight size={18} className="text-slate-400" />
-                </button>
-
                 {/* Language */}
                 <button onClick={() => { triggerHaptic(); setIsLanguagePickerOpen(true); }} className="w-full bg-white border border-slate-200 rounded-xl p-3 flex items-center justify-between active:scale-95">
                     <div className="flex items-center gap-3">
@@ -271,7 +257,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onLogin 
                 <div>
                      <label className="text-sm font-medium text-slate-900 block mb-2">{t.budgetLimit}</label>
                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-base font-bold">{getCurrencySymbol(country)}</span>
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500 text-base font-bold">{getCurrencySymbol()}</span>
                         <input type="number" value={budget} onChange={handleBudgetChange} className="w-full bg-white border border-slate-200 rounded-xl py-3 pl-10 pr-3 font-bold text-base text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                      </div>
                 </div>
@@ -333,13 +319,12 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose, onLogin 
         </div>
         
         <div className="mt-4 text-center border-t border-slate-100 pt-3 flex-shrink-0">
-            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Kharcha Bachau v1.0 🇳🇵</p>
+            <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Kharcha Bachau v0.4-beta 🇳🇵</p>
         </div>
       </div>
       
       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
       <WalletSelector isOpen={isWalletSelectorOpen} onClose={() => setIsWalletSelectorOpen(false)} />
-      <CountryPicker isOpen={isCountryPickerOpen} onClose={() => setIsCountryPickerOpen(false)} />
       <LanguagePicker isOpen={isLanguagePickerOpen} onClose={() => setIsLanguagePickerOpen(false)} />
       <CategoryManager isOpen={isCategoryManagerOpen} onClose={() => setIsCategoryManagerOpen(false)} />
     </div>
