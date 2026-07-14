@@ -1,77 +1,153 @@
-import React, { useMemo, useState, useCallback } from 'react';
+import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
-import { TRANSLATIONS } from '../constants';
-import { Trash2, Search, TrendingUp, X, Users } from 'lucide-react';
-import { format, isToday, isYesterday, isSameMonth, subMonths } from 'date-fns';
+import { Trash2, Search, X, Users, Tag, Filter } from 'lucide-react';
+import { format, subDays, startOfYear } from 'date-fns';
 import AuthModal from '../components/AuthModal';
 import EditExpenseModal from '../components/EditExpenseModal';
 import BalanceSummary from '../components/BalanceSummary';
+import FilterModal, { FilterState } from '../components/FilterModal';
+import NotificationBell from '../components/NotificationBell';
+import { TransactionListSkeleton } from '../components/Skeleton';
 import { Expense } from '../types';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
 
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const monthStart = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
+const monthEnd = (d: Date) => {
+  const lastDay = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(lastDay)}`;
+};
+
 
 const History: React.FC = () => {
-  const { language, expenses, deleteExpense, budget, monthlyStats, pieChartData, activeWallet, markSettlement } = useStore();
+  const { expenses, deleteExpense, restoreExpense, budget, monthlyStats, activeWallet, markSettlement, isSyncing } = useStore();
   const { user } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Expense | null>(null);
   
-  // Filter States
+  // Filter state — single source of truth (advancedFilters drives everything)
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'thisMonth' | 'lastMonth' | 'all'>('today');
-  const [showAnalyticsDetails, setShowAnalyticsDetails] = useState(false);
+  const [showFilterModal, setShowFilterModal] = useState(false);
+  const [advancedFilters, setAdvancedFilters] = useState<FilterState>({
+    dateRange: { type: 'preset', preset: 'thisMonth' },
+    categories: [],
+    tags: [],
+    amountRange: {}
+  });
   
-  // Memoize currentDate - recalculate once per day, not every render
-  const currentDate = useMemo(() => {
-    return new Date().toISOString().split('T')[0];
-  }, []); // Only recalculate once on mount, then daily (we can enhance this later)
+  // Get all available tags from expenses
+  const availableTags = useMemo(() => {
+    const allTags = new Set<string>();
+    expenses.forEach(expense => {
+      if (expense.tags) {
+        expense.tags.forEach(tag => allTags.add(tag));
+      }
+    });
+    return Array.from(allTags).sort();
+  }, [expenses]);
 
-  // Memoize translations
-  const t = useMemo(() => TRANSLATIONS[language], [language]);
+  // Whether any filter deviates from the default (this month, no category/tag/amount filters)
+  const isFilterActive = useMemo(() => {
+    const { dateRange, categories, tags, amountRange } = advancedFilters;
+    const dateActive = dateRange.type === 'custom' || (dateRange.type === 'preset' && dateRange.preset !== 'thisMonth');
+    const categoryActive = categories.length > 0;
+    const tagActive = tags.length > 0;
+    const amountActive = amountRange.min !== undefined || amountRange.max !== undefined;
+    return dateActive || categoryActive || tagActive || amountActive;
+  }, [advancedFilters]);
+  
+  // Recalculate currentDate at midnight
+  const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().split('T')[0]);
+  useEffect(() => {
+    const now = new Date();
+    const msUntilMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1).getTime() - now.getTime();
+    const timer = setTimeout(() => setCurrentDate(new Date().toISOString().split('T')[0]), msUntilMidnight);
+    return () => clearTimeout(timer);
+  }, []);
+
   const isGuest = useMemo(() => user?.type === 'guest', [user]);
   const currencySymbol = useMemo(() => getCurrencySymbol(), []);
 
-  // --- Filtering Logic ---
+  // --- Filtering Logic (single advancedFilters model) ---
   const filteredExpenses = useMemo(() => {
     let filtered = expenses;
     const now = new Date();
 
-    // Date Filter
-    if (dateFilter === 'today') {
+    // Date Range Filter
+    if (advancedFilters.dateRange.type === 'preset' && advancedFilters.dateRange.preset) {
+      const preset = advancedFilters.dateRange.preset;
+      if (preset === 'today') {
         filtered = filtered.filter(e => e.date === currentDate);
-    } else if (dateFilter === 'yesterday') {
+      } else if (preset === 'yesterday') {
         const yesterday = new Date(currentDate);
         yesterday.setDate(yesterday.getDate() - 1);
         const yesterdayStr = yesterday.toISOString().split('T')[0];
         filtered = filtered.filter(e => e.date === yesterdayStr);
-    } else if (dateFilter === 'thisMonth') {
-        filtered = filtered.filter(e => isSameMonth(new Date(e.date), now));
-    } else if (dateFilter === 'lastMonth') {
-        filtered = filtered.filter(e => isSameMonth(new Date(e.date), subMonths(now, 1)));
+      } else if (preset === 'thisMonth') {
+        filtered = filtered.filter(e => e.date >= monthStart(now) && e.date <= monthEnd(now));
+      } else if (preset === 'lastMonth') {
+        const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        filtered = filtered.filter(e => e.date >= monthStart(prev) && e.date <= monthEnd(prev));
+      } else if (preset === 'last7days') {
+        filtered = filtered.filter(e => e.date >= format(subDays(now, 7), 'yyyy-MM-dd'));
+      } else if (preset === 'last30days') {
+        filtered = filtered.filter(e => e.date >= format(subDays(now, 30), 'yyyy-MM-dd'));
+      } else if (preset === 'thisYear') {
+        filtered = filtered.filter(e => e.date >= format(startOfYear(now), 'yyyy-MM-dd'));
+      }
+      // 'all' doesn't filter
+    } else if (advancedFilters.dateRange.type === 'custom') {
+      if (advancedFilters.dateRange.customStart) {
+        filtered = filtered.filter(e => e.date >= advancedFilters.dateRange.customStart!);
+      }
+      if (advancedFilters.dateRange.customEnd) {
+        filtered = filtered.filter(e => e.date <= advancedFilters.dateRange.customEnd!);
+      }
+    }
+    
+    // Category Filter
+    if (advancedFilters.categories.length > 0) {
+      filtered = filtered.filter(e => advancedFilters.categories.includes(e.categoryId));
+    }
+    
+    // Tag Filter
+    if (advancedFilters.tags.length > 0) {
+      filtered = filtered.filter(e => 
+        e.tags && e.tags.some(tag => advancedFilters.tags.includes(tag))
+      );
+    }
+    
+    // Amount Range Filter
+    if (advancedFilters.amountRange.min !== undefined) {
+      filtered = filtered.filter(e => e.amount >= advancedFilters.amountRange.min!);
+    }
+    if (advancedFilters.amountRange.max !== undefined) {
+      filtered = filtered.filter(e => e.amount <= advancedFilters.amountRange.max!);
     }
 
-    // Search Filter
+    // Search Filter (always applied)
     if (searchTerm) {
-        const lower = searchTerm.toLowerCase();
-        filtered = filtered.filter(e => 
-            e.note?.toLowerCase().includes(lower) || 
-            e.categoryName.toLowerCase().includes(lower) ||
-            e.amount.toString().includes(lower)
-        );
+      const lower = searchTerm.toLowerCase();
+      filtered = filtered.filter(e => 
+        e.note?.toLowerCase().includes(lower) || 
+        e.categoryName.toLowerCase().includes(lower) ||
+        e.amount.toString().includes(lower) ||
+        e.tags?.some(tag => tag.toLowerCase().includes(lower))
+      );
     }
 
     // Sort by date first (newest dates first), then by createdAt as tiebreaker (newest first)
-    // Create new array to avoid mutating original
     return [...filtered].sort((a, b) => {
-      const dateComparison = new Date(b.date).getTime() - new Date(a.date).getTime();
+      const dateComparison = b.date < a.date ? -1 : b.date > a.date ? 1 : 0;
       if (dateComparison === 0) {
-        return (b.createdAt || 0) - (a.createdAt || 0); // Sort by createdAt if dates are the same
+        return (b.createdAt || 0) - (a.createdAt || 0);
       }
       return dateComparison;
     });
-  }, [expenses, dateFilter, searchTerm, currentDate]);
+  }, [expenses, searchTerm, advancedFilters, currentDate]);
 
   const grouped = useMemo(() => {
       const groups: Record<string, typeof filteredExpenses> = {};
@@ -84,9 +160,7 @@ const History: React.FC = () => {
           groups[date] = [...groups[date]].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
       });
       // Sort date groups by date (newest dates first)
-      const sortedDates = [...Object.keys(groups)].sort((a, b) => 
-        new Date(b).getTime() - new Date(a).getTime()
-      );
+      const sortedDates = [...Object.keys(groups)].sort((a, b) => b.localeCompare(a));
       const sortedGroups: Record<string, typeof filteredExpenses> = {};
       sortedDates.forEach(date => {
         sortedGroups[date] = groups[date];
@@ -99,83 +173,6 @@ const History: React.FC = () => {
       const total = filteredExpenses.reduce((s, e) => s + e.amount, 0);
       return { total };
   }, [filteredExpenses]);
-
-  // Dynamic analytics based on filtered expenses
-  const dynamicStats = useMemo(() => {
-    const now = new Date();
-    let comparisonPeriod: Expense[] = [];
-    
-    // Get comparison period expenses for trends
-    if (dateFilter === 'today') {
-      const yesterday = new Date(currentDate);
-      yesterday.setDate(yesterday.getDate() - 1);
-      const yesterdayStr = yesterday.toISOString().split('T')[0];
-      comparisonPeriod = expenses.filter(e => e.date === yesterdayStr);
-    } else if (dateFilter === 'yesterday') {
-      const dayBeforeYesterday = new Date(currentDate);
-      dayBeforeYesterday.setDate(dayBeforeYesterday.getDate() - 2);
-      const dayBeforeYesterdayStr = dayBeforeYesterday.toISOString().split('T')[0];
-      comparisonPeriod = expenses.filter(e => e.date === dayBeforeYesterdayStr);
-    } else if (dateFilter === 'thisMonth') {
-      comparisonPeriod = expenses.filter(e => isSameMonth(new Date(e.date), subMonths(now, 1)));
-    } else if (dateFilter === 'lastMonth') {
-      comparisonPeriod = expenses.filter(e => isSameMonth(new Date(e.date), subMonths(now, 2)));
-    }
-
-    // Single pass optimization: Calculate filtered period stats and category breakdown
-    let filteredExpense = 0;
-    const categoryTotals: Record<string, { value: number; emoji: string; name: string }> = {};
-    const expenseDates = new Set<string>();
-    let largestExpense: Expense | null = null as Expense | null;
-    
-    filteredExpenses.forEach(e => {
-      filteredExpense += e.amount;
-      expenseDates.add(e.date);
-      
-      if (!categoryTotals[e.categoryId]) {
-        categoryTotals[e.categoryId] = {
-          value: 0,
-          emoji: e.categoryEmoji || '📝',
-          name: e.categoryName || 'Other'
-        };
-      }
-      categoryTotals[e.categoryId].value += e.amount;
-      
-      if (!largestExpense || e.amount > largestExpense.amount) {
-        largestExpense = e;
-      }
-    });
-    
-    // Calculate comparison period stats
-    let compExpense = 0;
-    comparisonPeriod.forEach(e => {
-      compExpense += e.amount;
-    });
-    
-    // Calculate trends
-    const expenseTrend = compExpense > 0 ? ((filteredExpense - compExpense) / compExpense) * 100 : 0;
-
-    const categoryData = Object.values(categoryTotals)
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 8);
-
-    // Additional stats
-    const transactionCount = filteredExpenses.length;
-    const avgTransaction = transactionCount > 0 ? filteredExpense / transactionCount : 0;
-    const expenseDays = expenseDates.size;
-    const avgDaily = expenseDays > 0 ? filteredExpense / expenseDays : 0;
-
-    return {
-      filteredExpense,
-      expenseTrend,
-      categoryData,
-      transactionCount,
-      avgTransaction,
-      largestExpense,
-      expenseDays,
-      avgDaily
-    };
-  }, [filteredExpenses, dateFilter, expenses, currentDate]);
 
   // Member spending breakdown (for group wallets)
   const memberSpending = useMemo(() => {
@@ -200,11 +197,11 @@ const History: React.FC = () => {
   }, [filteredExpenses, activeWallet]);
 
   const getDateHeader = (dateStr: string) => {
-      const date = new Date(dateStr);
-      let enDate = format(date, 'MMM d, yyyy');
-      if (isToday(date)) enDate = t.today;
-      if (isYesterday(date)) enDate = t.yesterday;
-      return enDate;
+      if (dateStr === currentDate) return 'Today';
+      const yesterdayStr = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+      if (dateStr === yesterdayStr) return 'Yesterday';
+      // Parse as local date to avoid UTC shift (date-only strings are read as UTC midnight)
+      return format(new Date(dateStr + 'T00:00:00'), 'MMM d, yyyy');
   };
 
   // Budget calculations
@@ -212,103 +209,127 @@ const History: React.FC = () => {
   const budgetProgress = Math.min((currentMonthSpending / budget) * 100, 100);
   const isOverBudget = currentMonthSpending > budget;
   
-  // Show analytics for all filters except 'today' and 'yesterday'
-  const showAnalytics = dateFilter !== 'today' && dateFilter !== 'yesterday';
-  
   // Check if current wallet is a group wallet
   const isGroupWallet = activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1;
+
+  // Delete with Undo: deletion commits immediately; Undo restores within the window
+  const handleDelete = (item: Expense) => {
+    deleteExpense(item.id);
+    setPendingDelete(item);
+  };
+
+  useEffect(() => {
+    if (!pendingDelete) return;
+    const timer = setTimeout(() => setPendingDelete(null), 7000);
+    return () => clearTimeout(timer);
+  }, [pendingDelete]);
+
+  const handleUndo = () => {
+    if (pendingDelete) restoreExpense(pendingDelete);
+    setPendingDelete(null);
+  };
 
   return (
     <div 
       className="min-h-full bg-slate-50 overflow-x-hidden"
       style={{
-        paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
-        paddingLeft: 'max(1rem, env(safe-area-inset-left, 0px))',
-        paddingRight: 'max(1rem, env(safe-area-inset-right, 0px))',
-        paddingBottom: 'calc(4.5rem + env(safe-area-inset-bottom, 0px))'
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0px))',
+        paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+        paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))'
       }}
     >
-      <div className="pt-4 px-4">
-       {/* Simplified Header */}
-       <div className="mb-4">
-          <h2 className="text-xl font-bold text-slate-900 mb-1">{t.history}</h2>
+      <div className="pt-3 px-3 md:px-5 lg:px-6">
+       {/* Header */}
+       <div className="mb-4 flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900 mb-0.5">History</h1>
           {activeWallet && (
-            <p className="text-sm text-slate-600">{activeWallet.name}</p>
+            <p className="text-xs sm:text-sm text-slate-600">{activeWallet.name}</p>
           )}
+        </div>
+        <NotificationBell />
        </div>
 
-       {/* Budget Progress Bar - Always visible at top */}
-       <div className="bg-white p-4 rounded-xl border border-slate-200 mb-4">
-          <div className="mb-3">
-             <p className="text-sm font-medium text-slate-600">{t.monthlyBudget}</p>
-          </div>
-          <div className="flex items-baseline gap-1.5 mb-3">
-             <span className="text-2xl font-bold text-slate-900">{currencySymbol} {currentMonthSpending.toLocaleString()}</span>
-             <span className="text-base text-slate-500">/ {budget.toLocaleString()}</span>
-          </div>
-          <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
+       {/* Budget Progress + Summary — responsive row on desktop */}
+       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
+        <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200">
+           <p className="text-xs sm:text-sm font-medium text-slate-600 mb-2">Monthly Spending</p>
+           <div className="flex items-baseline gap-1.5 mb-2">
+              <span className="text-lg sm:text-xl font-bold text-slate-900">{currencySymbol} {currentMonthSpending.toLocaleString()}</span>
+              <span className="text-xs sm:text-sm text-slate-500">/ {budget.toLocaleString()}</span>
+           </div>
+           <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
               <div 
                 className={`h-full rounded-full ${isOverBudget ? 'bg-rose-600' : 'bg-emerald-600'}`} 
                 style={{ width: `${budgetProgress}%` }} 
               />
-          </div>
+           </div>
+        </div>
+        
+        {/* Summary Bar */}
+        <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 flex items-center justify-center">
+            <div className="text-center">
+                <p className="text-xs md:text-sm lg:text-base font-medium text-slate-500 mb-0.5 md:mb-1">Total Spent</p>
+                <p className="text-xl md:text-2xl lg:text-3xl font-bold text-rose-600">{currencySymbol} {summary.total.toLocaleString()}</p>
+            </div>
+        </div>
        </div>
 
-
-       {/* Simplified Filters - Single row with pills */}
+        {/* Filters Row — consistent 44px+ tap/click targets */}
        <div className="mb-4 flex items-center gap-2 flex-wrap">
-           {/* Search Button */}
            <button
                onClick={() => setShowSearch(!showSearch)}
-               className="w-10 h-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center active:scale-95"
+                className="min-w-[44px] min-h-[44px] bg-white border border-slate-200 rounded-xl flex items-center justify-center active:scale-95 hover:shadow-md hover:bg-slate-100 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
                aria-label="Search"
            >
-               <Search size={18} className="text-slate-600" />
+               <Search size={20} className="text-slate-600" />
            </button>
            
-           {/* Date Filter Pills */}
-           <div className="flex gap-2 flex-1">
-               <button
-                   onClick={() => setDateFilter('today')}
-                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
-                       dateFilter === 'today' 
-                           ? 'bg-emerald-600 text-white' 
-                           : 'bg-white border border-slate-200 text-slate-700'
-                   }`}
-               >
-                   Today
-               </button>
-               <button
-                   onClick={() => setDateFilter('yesterday')}
-                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
-                       dateFilter === 'yesterday' 
-                           ? 'bg-emerald-600 text-white' 
-                           : 'bg-white border border-slate-200 text-slate-700'
-                   }`}
-               >
-                   {t.yesterday}
-               </button>
-               <button
-                   onClick={() => setDateFilter('thisMonth')}
-                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
-                       dateFilter === 'thisMonth' 
-                           ? 'bg-emerald-600 text-white' 
-                           : 'bg-white border border-slate-200 text-slate-700'
-                   }`}
-               >
-                   Month
-               </button>
-               <button
-                   onClick={() => setDateFilter('all')}
-                   className={`px-3 py-1.5 rounded-lg text-sm font-medium active:scale-95 ${
-                       dateFilter === 'all' 
-                           ? 'bg-emerald-600 text-white' 
-                           : 'bg-white border border-slate-200 text-slate-700'
-                   }`}
-               >
-                   All
-               </button>
-           </div>
+           <button
+               onClick={() => setShowFilterModal(true)}
+                className={`min-w-[44px] min-h-[44px] border rounded-xl flex items-center justify-center active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                  isFilterActive
+                    ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
+                }`}
+               aria-label="Filters"
+           >
+               <Filter size={20} />
+           </button>
+           
+            {availableTags.length > 0 && (
+              <button
+                  onClick={() => { if (advancedFilters.tags.length > 0) setAdvancedFilters(prev => ({ ...prev, tags: [] })); }}
+                  className={`h-11 px-3 rounded-xl text-sm font-medium active:scale-95 flex items-center gap-1.5 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                      advancedFilters.tags.length > 0
+                          ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
+                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+              >
+                  <Tag size={16} />
+                  {advancedFilters.tags.length > 0 ? `${advancedFilters.tags.length}` : 'Tags'}
+              </button>
+            )}
+            
+            <div className="flex gap-1.5 flex-1 flex-wrap">
+                <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'today' } }))}
+                  className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                    advancedFilters.dateRange.preset === 'today' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                  }`}>Today</button>
+                <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'yesterday' } }))}
+                  className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                    advancedFilters.dateRange.preset === 'yesterday' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                  }`}>Yesterday</button>
+                <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'thisMonth' } }))}
+                  className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                    advancedFilters.dateRange.preset === 'thisMonth' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                  }`}>Month</button>
+                <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'all' } }))}
+                  className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                    advancedFilters.dateRange.preset === 'all' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                  }`}>All</button>
+            </div>
        </div>
        
        {/* Search Input - Show when toggled */}
@@ -317,7 +338,7 @@ const History: React.FC = () => {
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                <input 
                    type="text" 
-                   placeholder={t.searchPlaceholder} 
+                   placeholder="Search..." 
                    value={searchTerm}
                    onChange={e => setSearchTerm(e.target.value)}
                    className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -325,86 +346,63 @@ const History: React.FC = () => {
                />
                <button
                    onClick={() => { setShowSearch(false); setSearchTerm(''); }}
-                   className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 active:scale-95"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 active:scale-95 hover:text-slate-600 transition-colors"
                >
                    <X size={18} />
                </button>
            </div>
        )}
        
-       {/* Balance Summary - Only for group wallets */}
-       {activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1 && (
-         <BalanceSummary onSettle={markSettlement} />
-       )}
+        {/* Tag Filter - Show available tags */}
+        {availableTags.length > 0 && (
+            <div className="mb-3">
+                <div className="flex flex-wrap gap-2">
+                    {availableTags.map(tag => {
+                        const isSelected = advancedFilters.tags.includes(tag);
+                        return (
+                            <button
+                                key={tag}
+                                onClick={() => {
+                                    if (isSelected) {
+                                        setAdvancedFilters(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }));
+                                    } else {
+                                        setAdvancedFilters(prev => ({ ...prev, tags: [...prev.tags, tag] }));
+                                    }
+                                }}
+                                className={`px-2.5 py-1 rounded-lg text-xs font-medium active:scale-95 flex items-center gap-1 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                                    isSelected
+                                        ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
+                                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                                }`}
+                            >
+                                <Tag size={12} />
+                                {tag}
+                            </button>
+                        );
+                    })}
+                    {advancedFilters.tags.length > 0 && (
+                        <button
+                            onClick={() => setAdvancedFilters(prev => ({ ...prev, tags: [] }))}
+                            className="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-500 bg-white border border-slate-200 active:scale-95 hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+                        >
+                            All Tags
+                        </button>
+                    )}
+                </div>
+            </div>
+        )}
        
-       {/* Simplified Summary Bar */}
-       <div className="bg-white rounded-xl p-3 border border-slate-200 mb-4">
-           <div className="flex justify-center items-center">
-               <div className="text-center">
-                   <p className="text-xs font-medium text-slate-500 mb-0.5">Total Spent</p>
-                   <p className="text-xl font-bold text-slate-900">{currencySymbol} {summary.total.toLocaleString()}</p>
-               </div>
-           </div>
-       </div>
-       
-       {/* Simplified Analytics - Hidden by default */}
-       {showAnalytics && dynamicStats.categoryData.length > 0 && !showAnalyticsDetails && (
-           <div className="mb-4">
-               <button
-                   onClick={() => setShowAnalyticsDetails(true)}
-                   className="w-full bg-white rounded-xl p-3 border border-slate-200 text-left active:scale-95"
-               >
-                   <div className="flex justify-between items-center">
-                       <div>
-                           <p className="text-sm font-medium text-slate-900 mb-0.5">View Analytics</p>
-                           <p className="text-xs text-slate-500">See spending breakdown</p>
-                       </div>
-                       <TrendingUp size={18} className="text-slate-400" />
-                   </div>
-               </button>
-           </div>
-       )}
-       
-       {/* Detailed Analytics - Shown when expanded */}
-       {showAnalytics && showAnalyticsDetails && dynamicStats.categoryData.length > 0 && (
-           <div className="mb-4 space-y-3">
-               <div className="flex justify-between items-center">
-                   <h3 className="text-base font-semibold text-slate-900">Analytics</h3>
-                   <button
-                       onClick={() => setShowAnalyticsDetails(false)}
-                       className="p-1.5 text-slate-400 active:scale-95"
-                   >
-                       <X size={18} />
-                   </button>
-               </div>
-               
-               {/* Top Categories - Simple List */}
-               <div className="bg-white rounded-xl p-3 border border-slate-200">
-                   <h4 className="text-sm font-semibold text-slate-900 mb-3">Top Categories</h4>
-                   <div className="space-y-2">
-                       {dynamicStats.categoryData.slice(0, 5).map((item, index) => {
-                           const percent = dynamicStats.filteredExpense > 0 ? ((item.value / dynamicStats.filteredExpense) * 100).toFixed(0) : '0';
-                           return (
-                               <div key={index} className="flex items-center justify-between">
-                                   <div className="flex items-center gap-2 flex-1">
-                                       <span className="text-xl">{item.emoji}</span>
-                                       <span className="text-sm font-medium text-slate-900">{item.name}</span>
-                                   </div>
-                                   <div className="text-right">
-                                       <p className="text-sm font-bold text-slate-900">{currencySymbol} {item.value.toLocaleString()}</p>
-                                       <p className="text-xs text-slate-500">{percent}%</p>
-                                   </div>
-                               </div>
-                           );
-                       })}
-                   </div>
-               </div>
-           </div>
-       )}
+        {/* Group wallet settlement summary */}
+        {activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1 && (
+          <div className="mb-4">
+            <BalanceSummary onSettle={markSettlement} />
+          </div>
+        )}
 
-
-       {/* Simplified Transaction List */}
-       {Object.keys(grouped).length > 0 ? (
+         {/* Transaction List */}
+        {isSyncing && expenses.length === 0 ? (
+          <TransactionListSkeleton />
+        ) : Object.keys(grouped).length > 0 ? (
          <div className="space-y-4">
            {Object.keys(grouped).map(dateStr => {
                const enDate = getDateHeader(dateStr);
@@ -415,35 +413,64 @@ const History: React.FC = () => {
                    <div className="space-y-1.5">
                        {grouped[dateStr].map((item) => {
                            return (
-                           <div 
-                              key={item.id} 
-                              onClick={() => setEditingExpense(item)}
-                              className="bg-white p-3 rounded-xl border border-slate-200 flex items-center gap-3 active:scale-95 cursor-pointer"
-                           >
-                               <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0 bg-slate-50 relative">
-                                   {item.categoryEmoji}
-                                   {item.splitDetails && (
-                                     <div className="absolute -top-1 -right-1 w-4 h-4 bg-emerald-600 rounded-full flex items-center justify-center">
-                                       <Users size={10} className="text-white" />
-                                     </div>
-                                   )}
-                               </div>
-                               <div className="flex-1 min-w-0">
-                                   <div className="flex justify-between items-start mb-0.5">
-                                       <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                                           <h4 className="text-sm font-semibold text-slate-900 truncate">{item.categoryName}</h4>
-                                           {item.splitDetails && (
-                                             <span className="text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded flex-shrink-0">
-                                               Split
-                                             </span>
-                                           )}
+                                <div 
+                                   key={item.id} 
+                                   onClick={() => setEditingExpense(item)}
+                                   role="button"
+                                   tabIndex={0}
+                                   aria-label={`${item.categoryName} ${currencySymbol} ${item.amount}`}
+                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingExpense(item); } }}
+                                     className="bg-white p-3 md:p-4 lg:p-5 rounded-xl border border-slate-200 flex items-center gap-3 md:gap-4 lg:gap-5 active:scale-95 cursor-pointer select-none hover:shadow-md transition-shadow focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                                >
+                                    <div className="w-10 h-10 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-lg flex items-center justify-center text-xl md:text-2xl lg:text-3xl flex-shrink-0 bg-slate-50 relative">
+                                        {item.categoryEmoji}
+                                        {item.splitDetails && (
+                                          <div className="absolute -top-1 -right-1 w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 bg-emerald-600 rounded-full flex items-center justify-center">
+                                            <Users size={10} className="md:w-3 md:h-3 lg:w-4 lg:h-4 text-white" />
+                                          </div>
+                                        )}
+                                    </div>
+                                    <div className="flex-1 min-w-0">
+                                        <div className="flex justify-between items-start mb-0.5 md:mb-1">
+                                            <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                                                <h4 className="text-sm md:text-base lg:text-lg font-semibold text-slate-900 truncate">{item.categoryName}</h4>
+                                                {item.splitDetails && (
+                                                  <span className="text-[10px] md:text-xs lg:text-sm font-medium text-emerald-600 bg-emerald-50 px-1.5 md:px-2 lg:px-2.5 py-0.5 md:py-1 rounded flex-shrink-0">
+                                                    Split
+                                                  </span>
+                                                )}
+                                            </div>
+                                             <span className="text-sm md:text-base lg:text-lg font-bold whitespace-nowrap ml-2 text-rose-600">
+                                                 {currencySymbol} {item.amount.toLocaleString()}
+                                            </span>
+                                        </div>
+                                        {item.note && (
+                                            <p className="text-xs text-slate-500 truncate">{item.note}</p>
+                                        )}
+                                   {/* Transport Details */}
+                                   {item.transportDetails && (
+                                       <div className="text-[10px] text-blue-600 mt-1 space-y-0.5">
+                                           <p className="font-medium">
+                                               {item.transportDetails.from} → {item.transportDetails.to}
+                                           </p>
+                                           <p className="text-slate-500">
+                                               {item.transportDetails.passengers} Passengers
+                                           </p>
                                        </div>
-                                       <span className="text-sm font-bold whitespace-nowrap ml-2 text-slate-900">
-                                            {currencySymbol} {item.amount.toLocaleString()}
-                                       </span>
-                                   </div>
-                                   {item.note && (
-                                       <p className="text-xs text-slate-500 truncate">{item.note}</p>
+                                   )}
+                                   {/* Tags */}
+                                   {item.tags && item.tags.length > 0 && (
+                                       <div className="flex flex-wrap gap-1 mt-1">
+                                           {item.tags.map(tag => (
+                                               <span
+                                                   key={tag}
+                                                   className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 rounded text-[10px] font-medium text-emerald-700"
+                                               >
+                                                   <Tag size={8} />
+                                                   {tag}
+                                               </span>
+                                           ))}
+                                       </div>
                                    )}
                                    {item.splitDetails && (
                                        <p className="text-[10px] text-slate-400 mt-0.5">
@@ -452,16 +479,16 @@ const History: React.FC = () => {
                                        </p>
                                    )}
                                    {isGroupWallet && item.createdBy?.name && !item.splitDetails && (
-                                       <p className="text-[10px] text-slate-400 mt-0.5">{t.addedBy} {item.createdBy.name}</p>
+                                       <p className="text-[10px] text-slate-400 mt-0.5">Added by {item.createdBy.name}</p>
                                    )}
                                </div>
                                <button 
-                                  onClick={(e) => { e.stopPropagation(); deleteExpense(item.id); }}
-                                  className="p-1.5 text-slate-400 active:scale-95 flex-shrink-0"
-                                  aria-label="Delete"
-                               >
-                                   <Trash2 size={16} />
-                               </button>
+                                   onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
+                                    className="min-w-[44px] min-h-[44px] text-slate-400 active:scale-95 flex-shrink-0 flex items-center justify-center hover:text-rose-600 hover:bg-rose-50 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500"
+                                   aria-label={`Delete ${item.categoryName}`}
+                                >
+                                    <Trash2 size={18} />
+                                </button>
                            </div>
                            );
                        })}
@@ -470,15 +497,42 @@ const History: React.FC = () => {
                );
            })}
          </div>
-       ) : (
-         <div className="text-center py-12 flex flex-col items-center">
-           <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                <Search size={32} className="text-slate-400" />
-           </div>
-           <p className="text-base font-semibold text-slate-600 mb-1">No transactions found</p>
-           <p className="text-sm text-slate-500">Try adjusting your filters</p>
-         </div>
-       )}
+        ) : (
+          <div className="text-center py-12 flex flex-col items-center">
+            <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
+                 <Search size={32} className="text-slate-400" />
+            </div>
+            {expenses.length === 0 ? (
+              <>
+                <p className="text-base font-semibold text-slate-600 mb-1">No expenses yet</p>
+                <p className="text-sm text-slate-500">Click the + button to log your first expense</p>
+              </>
+            ) : (
+              <>
+                <p className="text-base font-semibold text-slate-600 mb-1">No transactions found</p>
+                <p className="text-sm text-slate-500">Try adjusting your filters</p>
+              </>
+            )}
+          </div>
+        )}
+
+         {/* Undo snackbar */}
+        {pendingDelete && (
+          <div
+            className="fixed left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white rounded-xl shadow-2xl flex items-center gap-3 px-4 py-3 animate-fade-in"
+            style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))', maxWidth: 'calc(100% - 2rem)' }}
+            role="status"
+          >
+            <span className="text-sm">Deleted</span>
+            <button
+              onClick={handleUndo}
+              className="text-sm font-semibold text-emerald-400 active:scale-95 min-h-[36px] px-2 hover:text-emerald-300 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+            >
+              Undo
+            </button>
+          </div>
+        )}
+
 
        <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
        <EditExpenseModal 
@@ -486,6 +540,14 @@ const History: React.FC = () => {
          isOpen={!!editingExpense}
          onClose={() => setEditingExpense(null)}
        />
+        <FilterModal
+          isOpen={showFilterModal}
+          onClose={() => setShowFilterModal(false)}
+          onApply={(filters) => setAdvancedFilters(filters)}
+          expenses={expenses}
+          availableTags={availableTags}
+          currentFilters={advancedFilters}
+        />
       </div>
     </div>
   );

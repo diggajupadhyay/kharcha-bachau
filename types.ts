@@ -1,8 +1,5 @@
 
-export type Language = 'en' | 'np';
 export type NotificationType = 'success' | 'error' | 'info';
-export type Season = 'basanta' | 'grishma' | 'barsha' | 'sharad' | 'hemanta' | 'shishir' | 'all';
-export type DateRange = 'thisMonth' | 'lastMonth' | 'all';
 
 export interface Notification {
   id: string;
@@ -31,7 +28,6 @@ export interface Wallet {
 export interface Category {
   id: string;
   name: string;
-  name_np: string;
   emoji: string;
   color: string;
 }
@@ -50,6 +46,12 @@ export interface Expense {
     name: string;
   };
   createdAt: number;
+  tags?: string[]; // Array of tag strings for expense organization
+  transportDetails?: {
+    passengers: number; // Number of people on board
+    from: string; // Origin location
+    to: string; // Destination location
+  };
   splitDetails?: {
     splitType: 'equal' | 'percentage' | 'custom';
     participants: Array<{
@@ -85,11 +87,9 @@ export type SplitDetails = Expense['splitDetails'];
 export interface AuthContextType {
   user: User | null;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string) => Promise<void>;
+  signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   continueAsGuest: () => void;
-  resetPassword: (email: string) => Promise<void>;
 }
 
 export interface MonthlyStats {
@@ -98,17 +98,7 @@ export interface MonthlyStats {
   percentChange: number;
 }
 
-export interface PieChartData {
-  name: string;
-  value: number;
-  color: string;
-  emoji: string;
-}
-
 export interface StoreContextType {
-  language: Language;
-  setLanguage: (lang: Language) => void;
-  
   // Wallet Management
   wallets: Wallet[];
   activeWallet: Wallet | null;
@@ -122,11 +112,12 @@ export interface StoreContextType {
   budget: number;
   setBudget: (amount: number) => void;
   monthlyStats: MonthlyStats;
-  pieChartData: PieChartData[];
+  isSyncing: boolean;
   
-  addExpense: (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => Promise<void>;
-  updateExpense: (id: string, amount: number, note: string) => Promise<void>;
+  addExpense: (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => Promise<void>;
+  updateExpense: (id: string, amount: number, note: string, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
+  restoreExpense: (expense: Expense) => Promise<void>;
   setExpenses: (expenses: Expense[]) => void;
   
   // Expense Splitting
@@ -145,9 +136,12 @@ export interface StoreContextType {
   showNotification: (type: NotificationType, message: string) => void;
   dismissNotification: (id: string) => void;
   triggerHaptic: () => void;
+  
+  // App Notifications
+  appNotifications: import('./services/notificationService').AppNotification[];
+  updateAppNotifications: (notifications: import('./services/notificationService').AppNotification[]) => void;
+  markAppNotificationRead: (id: string) => void;
+  dismissAppNotification: (id: string) => void;
+  markAllAppNotificationsRead: () => void;
 }
 
-export enum ViewState {
-  HOME = 'HOME',
-  HISTORY = 'HISTORY'
-}

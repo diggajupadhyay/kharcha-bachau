@@ -12,9 +12,7 @@ Kharcha Bachau is a simple, smart, and free expense tracker designed for Nepal. 
 *   **100% Free:** No subscriptions, no hidden fees.
 *   **Offline First:** Works perfectly without internet (Guest Mode).
 *   **Cloud Sync:** Optional login to sync data across devices via Firebase.
-*   **Nepali Calendar:** Full support for Bikram Sambat (BS) dates.
-*   **Smart Analytics:** Visual pie charts and monthly comparisons.
-*   **Income & Expense:** Track both earnings and spending.
+*   **Smart Analytics:** Monthly comparisons and category breakdowns.
 
 ---
 
@@ -152,23 +150,23 @@ The app uses environment variables for Firebase configuration. In production, yo
 - Check if Firebase service is experiencing outages
 - Try again after a few moments
 
-#### 6. Signup/Login Not Working
-**Problem**: Cannot create account or sign in.
+#### 6. Google Sign-In Not Working
+**Problem**: Cannot sign in with Google.
 
 **Solution**:
-- Verify Firebase Auth is enabled in Firebase Console
-- Check that Email/Password provider is enabled
-- Ensure environment variables are correct
+- Verify Google Sign-In provider is enabled in Firebase Console
+- Ensure the authorized domains list includes your hosting domain
 - Check browser console for specific error messages
-- Verify password meets requirements (minimum 6 characters)
+- Verify `VITE_FIREBASE_*` environment variables are correct
+- Check that Google Sign-In is not blocked by a popup blocker
 
-#### 7. Guest Data Not Syncing After Signup
-**Problem**: Guest expenses don't appear after creating account.
+#### 7. Guest Data Not Syncing After Sign-In
+**Problem**: Guest expenses don't appear after signing in with Google.
 
 **Solution**:
-- Data sync happens automatically on first login
+- Data sync happens automatically on first sign-in
 - If sync fails, guest data remains in localStorage
-- Try logging out and back in to trigger sync again
+- Try signing out and back in to trigger sync again
 - Check browser console for sync errors
 
 ### Debug Mode

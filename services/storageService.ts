@@ -1,14 +1,16 @@
-
 import { db } from './firebase';
 import { User, Expense, Wallet, Category } from '../types';
-import { format } from 'date-fns';
-import firebase from 'firebase/compat/app';
+import { isSplitSumValid } from '../utils/split';
+import {
+  doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
+  collection, query, where, orderBy, limit,
+  writeBatch, onSnapshot, arrayRemove, arrayUnion,
+  DocumentData
+} from 'firebase/firestore';
 
 const GUEST_DATA_KEY = 'daily_expenses_guest_v1';
 const MONTHLY_BUDGET_KEY = 'daily_expenses_budget_monthly';
 const GUEST_CATEGORIES_KEY = 'kharcha_bachau_custom_categories_guest';
-
-// --- Wallet Management ---
 
 export const createGuestWallet = (): Wallet => ({
     id: 'guest_wallet',
@@ -22,9 +24,10 @@ export const createGuestWallet = (): Wallet => ({
 
 export const createWallet = async (user: User, walletName: string, isPersonal: boolean = false): Promise<string> => {
     if (user.type === 'guest') throw new Error("Guests cannot create shared wallets");
+    if (walletName.length > 50) throw new Error("Wallet name too long (max 50 characters)");
     
     try {
-        const newWalletRef = db.collection('wallets').doc();
+        const newWalletRef = doc(collection(db, 'wallets'));
         const newWallet: Wallet = {
             id: newWalletRef.id,
             name: walletName,
@@ -35,7 +38,7 @@ export const createWallet = async (user: User, walletName: string, isPersonal: b
             isPersonal: isPersonal
         };
         
-        await newWalletRef.set(newWallet);
+        await setDoc(newWalletRef, newWallet);
         
         if (import.meta.env.DEV) {
             console.log('Wallet created successfully:', newWalletRef.id, isPersonal ? '(personal)' : '(shared)');
@@ -47,7 +50,6 @@ export const createWallet = async (user: User, walletName: string, isPersonal: b
             console.error('Error creating wallet:', error);
         }
         
-        // Provide user-friendly error messages
         if (error.code === 'permission-denied') {
             throw new Error('Permission denied. Please check your authentication.');
         } else if (error.code === 'unavailable') {
@@ -64,9 +66,8 @@ export const getUserWallets = async (user: User): Promise<Wallet[]> => {
     }
 
     try {
-        const snapshot = await db.collection('wallets')
-            .where('members', 'array-contains', user.id)
-            .get();
+        const q = query(collection(db, 'wallets'), where('members', 'array-contains', user.id));
+        const snapshot = await getDocs(q);
         
         const wallets = snapshot.docs.map(doc => doc.data() as Wallet);
         
@@ -80,8 +81,6 @@ export const getUserWallets = async (user: User): Promise<Wallet[]> => {
             console.error("Error fetching wallets:", error.code, error.message);
         }
         
-        // Return empty array on error to prevent app crash
-        // The UI should handle empty wallets gracefully
         return [];
     }
 };
@@ -90,8 +89,8 @@ export const leaveWallet = async (user: User, walletId: string) => {
     if (user.type === 'guest') return;
     
     try {
-        await db.collection('wallets').doc(walletId).update({
-            members: firebase.firestore.FieldValue.arrayRemove(user.id)
+        await updateDoc(doc(db, 'wallets', walletId), {
+            members: arrayRemove(user.id)
         });
         
         if (import.meta.env.DEV) {
@@ -116,17 +115,15 @@ export const deleteWallet = async (user: User, walletId: string) => {
     if (user.type === 'guest') return;
     
     try {
-        // 1. Delete all expenses in subcollection (Batched)
-        const expensesRef = db.collection('wallets').doc(walletId).collection('expenses');
-        const snapshot = await expensesRef.get();
+        const expensesRef = collection(db, 'wallets', walletId, 'expenses');
+        const snapshot = await getDocs(expensesRef);
         
-        const batch = db.batch();
-        snapshot.docs.forEach((doc) => {
-            batch.delete(doc.ref);
+        const batch = writeBatch(db);
+        snapshot.docs.forEach((docSnap) => {
+            batch.delete(docSnap.ref);
         });
         
-        // 2. Delete the wallet itself
-        const walletRef = db.collection('wallets').doc(walletId);
+        const walletRef = doc(db, 'wallets', walletId);
         batch.delete(walletRef);
 
         await batch.commit();
@@ -149,67 +146,48 @@ export const deleteWallet = async (user: User, walletId: string) => {
     }
 };
 
-// --- Wallet Merge & Cleanup ---
-
-/**
- * Merge expenses from source wallet into target wallet
- * Handles duplicate expense IDs by keeping the target wallet's version
- * @param user - The user performing the merge
- * @param sourceWalletId - Wallet to merge from (will be deleted after merge)
- * @param targetWalletId - Wallet to merge into (kept)
- */
 export const mergeWallets = async (user: User, sourceWalletId: string, targetWalletId: string): Promise<void> => {
     if (user.type === 'guest') throw new Error("Guests cannot merge wallets");
     if (sourceWalletId === targetWalletId) throw new Error("Cannot merge wallet into itself");
     
     try {
-        // Get all expenses from source wallet
-        const sourceExpensesRef = db.collection('wallets').doc(sourceWalletId).collection('expenses');
-        const sourceSnapshot = await sourceExpensesRef.get();
+        const sourceExpensesRef = collection(db, 'wallets', sourceWalletId, 'expenses');
+        const sourceSnapshot = await getDocs(sourceExpensesRef);
         
         if (sourceSnapshot.empty) {
             if (import.meta.env.DEV) {
                 console.log('Source wallet is empty, deleting empty wallet');
             }
-            // Delete empty source wallet
-            const sourceWalletRef = db.collection('wallets').doc(sourceWalletId);
-            await sourceWalletRef.delete();
+            const sourceWalletRef = doc(db, 'wallets', sourceWalletId);
+            await deleteDoc(sourceWalletRef);
             return;
         }
 
-        // Get existing expenses from target wallet to check for duplicates
-        const targetExpensesRef = db.collection('wallets').doc(targetWalletId).collection('expenses');
-        const targetSnapshot = await targetExpensesRef.get();
+        const targetExpensesRef = collection(db, 'wallets', targetWalletId, 'expenses');
+        const targetSnapshot = await getDocs(targetExpensesRef);
         const existingExpenseIds = new Set(targetSnapshot.docs.map(doc => doc.id));
 
-        // Batch merge expenses
-        const batch = db.batch();
+        const batch = writeBatch(db);
         let mergedCount = 0;
         let skippedCount = 0;
 
-        sourceSnapshot.docs.forEach((doc) => {
-            const expense = doc.data() as Expense;
+        sourceSnapshot.docs.forEach((docSnap) => {
+            const expense = docSnap.data() as Expense;
             
-            // Check if expense with same ID already exists in target
             if (existingExpenseIds.has(expense.id)) {
-                // Skip duplicate - keep target wallet's version
                 skippedCount++;
                 if (import.meta.env.DEV) {
                     console.log(`Skipping duplicate expense: ${expense.id}`);
                 }
             } else {
-                // Copy expense to target wallet with updated walletId
-                const newExpenseRef = targetExpensesRef.doc(expense.id);
+                const newExpenseRef = doc(targetExpensesRef, expense.id);
                 const mergedExpense: Expense = {
                     ...expense,
                     walletId: targetWalletId,
-                    // Update createdBy to current user to comply with Firestore rules
-                    // Rules require createdBy.uid == request.auth.uid for expense creation
                     createdBy: {
                         uid: user.id,
                         name: user.name
                     }
-                    // Preserve original createdAt for historical accuracy
                 };
                 batch.set(newExpenseRef, mergedExpense);
                 mergedCount++;
@@ -218,18 +196,14 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
 
         await batch.commit();
 
-        // Delete source wallet and its expenses
-        // We delete expenses first, then the wallet document
-        const deleteBatch = db.batch();
+        const deleteBatch = writeBatch(db);
         
-        // Delete all remaining expenses from source wallet
-        const remainingExpensesSnapshot = await sourceExpensesRef.get();
-        remainingExpensesSnapshot.docs.forEach((doc) => {
-            deleteBatch.delete(doc.ref);
+        const remainingExpensesSnapshot = await getDocs(sourceExpensesRef);
+        remainingExpensesSnapshot.docs.forEach((docSnap) => {
+            deleteBatch.delete(docSnap.ref);
         });
         
-        // Delete the source wallet document
-        const sourceWalletRef = db.collection('wallets').doc(sourceWalletId);
+        const sourceWalletRef = doc(db, 'wallets', sourceWalletId);
         deleteBatch.delete(sourceWalletRef);
         
         await deleteBatch.commit();
@@ -252,12 +226,6 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
     }
 };
 
-/**
- * Cleanup duplicate personal wallets by merging them into one
- * Keeps the wallet with the most expenses, or the oldest one if equal
- * @param user - The user whose wallets to clean up
- * @returns The remaining personal wallet ID, or null if none existed
- */
 export const cleanupDuplicatePersonalWallets = async (user: User): Promise<string | null> => {
     if (user.type === 'guest') return null;
     
@@ -265,7 +233,6 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
         const allWallets = await getUserWallets(user);
         const personalWallets = allWallets.filter(w => w.isPersonal === true);
         
-        // No duplicates, nothing to clean up
         if (personalWallets.length <= 1) {
             return personalWallets.length === 1 ? personalWallets[0].id : null;
         }
@@ -274,11 +241,10 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
             console.log(`Found ${personalWallets.length} personal wallets, cleaning up duplicates...`);
         }
 
-        // Get expense counts for each personal wallet to determine which to keep
         const walletExpenseCounts = await Promise.all(
             personalWallets.map(async (wallet) => {
-                const expensesRef = db.collection('wallets').doc(wallet.id).collection('expenses');
-                const snapshot = await expensesRef.get();
+                const expensesRef = collection(db, 'wallets', wallet.id, 'expenses');
+                const snapshot = await getDocs(expensesRef);
                 return {
                     wallet,
                     expenseCount: snapshot.size,
@@ -287,19 +253,16 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
             })
         );
 
-        // Sort by expense count (descending), then by creation date (oldest first) if equal
         walletExpenseCounts.sort((a, b) => {
             if (b.expenseCount !== a.expenseCount) {
-                return b.expenseCount - a.expenseCount; // Most expenses first
+                return b.expenseCount - a.expenseCount;
             }
-            return a.wallet.createdAt - b.wallet.createdAt; // Oldest first
+            return a.wallet.createdAt - b.wallet.createdAt;
         });
 
-        // Target wallet is the one with most expenses (or oldest if equal)
         const targetWallet = walletExpenseCounts[0].wallet;
         const walletsToMerge = walletExpenseCounts.slice(1);
 
-        // Merge all duplicate wallets into target
         for (const { wallet } of walletsToMerge) {
             try {
                 await mergeWallets(user, wallet.id, targetWallet.id);
@@ -307,7 +270,6 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
                     console.log(`Merged wallet ${wallet.id} into ${targetWallet.id}`);
                 }
             } catch (error: any) {
-                // Log error but continue with other merges
                 if (import.meta.env.DEV) {
                     console.error(`Failed to merge wallet ${wallet.id}:`, error);
                 }
@@ -323,35 +285,30 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
         if (import.meta.env.DEV) {
             console.error('Error cleaning up duplicate personal wallets:', error);
         }
-        // Don't throw - allow app to continue even if cleanup fails
         return null;
     }
 };
 
-// --- Invite System ---
-
 export const getOrGenerateInviteCode = async (walletId: string): Promise<string> => {
     try {
-        // Check if code exists for this wallet
-        const existing = await db.collection('invites').where('walletId', '==', walletId).limit(1).get();
+        const q = query(collection(db, 'invites'), where('walletId', '==', walletId), limit(1));
+        const existing = await getDocs(q);
         if (!existing.empty) {
             return existing.docs[0].id;
         }
 
-        // Generate new unique 6-digit code with retry logic to handle collisions
         const maxRetries = 5;
         let attempts = 0;
         
         while (attempts < maxRetries) {
             const code = Math.random().toString(36).substring(2, 8).toUpperCase();
             
-            // Check if code already exists
-            const codeDoc = await db.collection('invites').doc(code).get();
+            const codeDocRef = doc(db, 'invites', code);
+            const codeDoc = await getDoc(codeDocRef);
             
-            if (!codeDoc.exists) {
-                // Code doesn't exist, safe to use
+            if (!codeDoc.exists()) {
                 try {
-                    await db.collection('invites').doc(code).set({
+                    await setDoc(codeDocRef, {
                         walletId,
                         createdAt: Date.now()
                     });
@@ -362,7 +319,6 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
                     
                     return code;
                 } catch (error: any) {
-                    // If set fails (e.g., due to race condition), retry
                     if (error.code === 'permission-denied' || error.code === 'already-exists') {
                         attempts++;
                         continue;
@@ -370,7 +326,6 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
                     throw error;
                 }
             } else {
-                // Code exists, try again
                 attempts++;
                 if (import.meta.env.DEV) {
                     console.warn(`Invite code collision detected, retrying... (attempt ${attempts}/${maxRetries})`);
@@ -378,7 +333,6 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
             }
         }
         
-        // If we've exhausted retries, throw error
         throw new Error('Failed to generate unique invite code after multiple attempts');
     } catch (error: any) {
         if (import.meta.env.DEV) {
@@ -395,8 +349,9 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
 
 export const joinWalletByCode = async (user: User, code: string): Promise<string> => {
     try {
-        const inviteDoc = await db.collection('invites').doc(code.toUpperCase()).get();
-        if (!inviteDoc.exists) {
+        const inviteDocRef = doc(db, 'invites', code.toUpperCase());
+        const inviteDoc = await getDoc(inviteDocRef);
+        if (!inviteDoc.exists()) {
             throw new Error("Invalid invite code");
         }
 
@@ -405,9 +360,8 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
             throw new Error("Invalid invite data");
         }
 
-        // Add user to wallet members
-        await db.collection('wallets').doc(walletId).update({
-            members: firebase.firestore.FieldValue.arrayUnion(user.id)
+        await updateDoc(doc(db, 'wallets', walletId), {
+            members: arrayUnion(user.id)
         });
         
         if (import.meta.env.DEV) {
@@ -420,7 +374,6 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
             console.error('Error joining wallet:', error);
         }
         
-        // Re-throw user-friendly errors
         if (error.message === "Invalid invite code" || error.message === "Invalid invite data") {
             throw error;
         }
@@ -435,8 +388,6 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
     }
 };
 
-// --- Expense Management ---
-
 const getLocalData = (): Expense[] => {
   try {
       const data = localStorage.getItem(GUEST_DATA_KEY);
@@ -449,51 +400,62 @@ const saveLocalData = (data: Expense[]) => {
   localStorage.setItem(GUEST_DATA_KEY, JSON.stringify(data));
 };
 
+const buildExpenseDocument = (
+  expense: Omit<Expense, 'id' | 'createdAt' | 'walletId' | 'createdBy'>,
+  user: User,
+  activeWalletId: string
+): Expense => {
+  const doc: Record<string, unknown> = {
+    categoryId: expense.categoryId,
+    categoryName: expense.categoryName,
+    categoryEmoji: expense.categoryEmoji,
+    amount: expense.amount,
+    note: expense.note,
+    date: expense.date,
+    id: crypto.randomUUID(),
+    walletId: activeWalletId,
+    createdBy: {
+        uid: user.id,
+        name: user.name
+    },
+    createdAt: Date.now()
+  };
+  
+  if (expense.splitDetails) {
+    doc.splitDetails = expense.splitDetails;
+  }
+  
+  if (expense.tags && expense.tags.length > 0) {
+    doc.tags = expense.tags;
+  }
+  
+  if (expense.transportDetails) {
+    doc.transportDetails = expense.transportDetails;
+  }
+  
+  return doc as unknown as Expense;
+};
+
 export const addExpense = async (user: User, activeWalletId: string, expense: Omit<Expense, 'id' | 'createdAt' | 'walletId' | 'createdBy'>) => {
     if (isNaN(expense.amount) || expense.amount < 0) throw new Error("Invalid amount");
+    if (expense.note && expense.note.length > 500) throw new Error("Note too long (max 500 characters)");
 
-    // Validate split details if provided
     if (expense.splitDetails) {
         const { splitType, participants, paidBy } = expense.splitDetails;
         if (!paidBy || !participants || participants.length === 0) {
             throw new Error("Invalid split details");
         }
-        
-        // Validate split amounts add up
-        const totalSplit = participants.reduce((sum, p) => sum + p.amount, 0);
-        const tolerance = 0.01; // Allow small rounding differences
-        if (Math.abs(totalSplit - expense.amount) > tolerance) {
-            throw new Error(`Split amounts (${totalSplit}) don't match total (${expense.amount})`);
+
+        if (!isSplitSumValid(expense.splitDetails, expense.amount)) {
+            throw new Error(`Split amounts don't match total (${expense.amount})`);
         }
     }
 
-    // Build expense object, omitting splitDetails if undefined
-    const expenseData: any = {
-        categoryId: expense.categoryId,
-        categoryName: expense.categoryName,
-        categoryEmoji: expense.categoryEmoji,
-        amount: expense.amount,
-        note: expense.note,
-        date: expense.date,
-        id: crypto.randomUUID(),
-        walletId: activeWalletId,
-        createdBy: {
-            uid: user.id,
-            name: user.name
-        },
-        createdAt: Date.now()
-    };
-    
-    // Only include splitDetails if it's actually defined
-    if (expense.splitDetails) {
-        expenseData.splitDetails = expense.splitDetails;
-    }
-    
-    const newExpense: Expense = expenseData;
+    const newExpense = buildExpenseDocument(expense, user, activeWalletId);
 
     if (user.type === 'guest') {
         const current = getLocalData();
-        await new Promise(r => setTimeout(r, 10)); // UX delay
+        await new Promise(r => setTimeout(r, 10));
         saveLocalData([...current, newExpense]);
         
         if (import.meta.env.DEV) {
@@ -501,16 +463,13 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
         }
     } else {
         try {
-            await db.collection('wallets').doc(activeWalletId)
-                .collection('expenses').doc(newExpense.id)
-                .set(newExpense);
+            await setDoc(doc(db, 'wallets', activeWalletId, 'expenses', newExpense.id), newExpense);
             
             if (import.meta.env.DEV) {
                 console.log('Expense saved to Firestore:', newExpense.id);
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
-                // Log detailed error information (only in development)
                 console.error('Error saving expense:', {
                     code: error.code,
                     message: error.message,
@@ -524,7 +483,6 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
             } else if (error.code === 'unavailable') {
                 throw new Error('Network error. Please check your connection and try again.');
             } else if (error.message) {
-                // Include the actual error message for debugging
                 throw new Error(`Failed to save expense: ${error.message}`);
             }
             
@@ -536,11 +494,27 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
 export const updateExpense = async (user: User, activeWalletId: string, expenseId: string, updates: Partial<Expense>) => {
     if (updates.amount !== undefined && (isNaN(updates.amount) || updates.amount < 0)) throw new Error("Invalid amount");
 
-    // Filter updates to only allow fields permitted by Firestore rules: amount, note, splitDetails
-    const allowedUpdates: Partial<Expense> = {};
+    // Validate split sums client-side when both amount and splitDetails are provided
+    if (updates.splitDetails !== undefined && updates.amount !== undefined) {
+        if (!isSplitSumValid(updates.splitDetails, updates.amount)) {
+            throw new Error(`Split amounts don't match total (${updates.amount})`);
+        }
+    }
+
+    const allowedUpdates: Record<string, unknown> = {};
     if (updates.amount !== undefined) allowedUpdates.amount = updates.amount;
     if (updates.note !== undefined) allowedUpdates.note = updates.note;
     if (updates.splitDetails !== undefined) allowedUpdates.splitDetails = updates.splitDetails;
+    if (updates.tags !== undefined) {
+        const normalizedTags = updates.tags
+            .map(t => t.trim().toLowerCase())
+            .filter(t => t.length > 0 && t.length <= 20)
+            .slice(0, 5);
+        allowedUpdates.tags = normalizedTags.length > 0 ? normalizedTags : [];
+    }
+    if (updates.transportDetails !== undefined) {
+        allowedUpdates.transportDetails = updates.transportDetails;
+    }
 
     if (user.type === 'guest') {
         const current = getLocalData();
@@ -552,9 +526,7 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
         }
     } else {
         try {
-            await db.collection('wallets').doc(activeWalletId)
-                .collection('expenses').doc(expenseId)
-                .update(allowedUpdates);
+            await updateDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId), allowedUpdates);
             
             if (import.meta.env.DEV) {
                 console.log('Expense updated in Firestore:', expenseId);
@@ -577,8 +549,6 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
     }
 };
 
-// --- Custom Categories Management ---
-
 export const getCustomCategories = async (user: User): Promise<Category[]> => {
     if (user.type === 'guest') {
         try {
@@ -589,13 +559,13 @@ export const getCustomCategories = async (user: User): Promise<Category[]> => {
         }
     } else {
         try {
-            const userDoc = await db.collection('users').doc(user.id).get();
-            if (userDoc.exists) {
+            const userDocRef = doc(db, 'users', user.id);
+            const userDoc = await getDoc(userDocRef);
+            if (userDoc.exists()) {
                 const data = userDoc.data();
                 return data?.customCategories || [];
             } else {
-                // Create user document if it doesn't exist
-                await db.collection('users').doc(user.id).set({
+                await setDoc(userDocRef, {
                     id: user.id,
                     name: user.name,
                     email: user.email,
@@ -618,14 +588,14 @@ export const saveCustomCategories = async (user: User, categories: Category[]): 
         localStorage.setItem(GUEST_CATEGORIES_KEY, JSON.stringify(categories));
     } else {
         try {
-            const userDoc = await db.collection('users').doc(user.id).get();
-            if (userDoc.exists) {
-                await db.collection('users').doc(user.id).update({
+            const userDocRef = doc(db, 'users', user.id);
+            const userDoc = await getDoc(userDocRef);
+            if (userDoc.exists()) {
+                await updateDoc(userDocRef, {
                     customCategories: categories
                 });
             } else {
-                // Create user document if it doesn't exist
-                await db.collection('users').doc(user.id).set({
+                await setDoc(userDocRef, {
                     id: user.id,
                     name: user.name,
                     email: user.email,
@@ -656,9 +626,7 @@ export const deleteExpense = async (user: User, activeWalletId: string, expenseI
         }
     } else {
         try {
-            await db.collection('wallets').doc(activeWalletId)
-                .collection('expenses').doc(expenseId)
-                .delete();
+            await deleteDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId));
             
             if (import.meta.env.DEV) {
                 console.log('Expense deleted from Firestore:', expenseId);
@@ -681,6 +649,17 @@ export const deleteExpense = async (user: User, activeWalletId: string, expenseI
     }
 };
 
+// Re-create a previously deleted expense (used by Undo). Preserves the original id/createdAt.
+export const restoreExpense = async (user: User, activeWalletId: string, expense: Expense) => {
+    if (user.type === 'guest') {
+        const current = getLocalData();
+        const exists = current.some(p => p.id === expense.id);
+        saveLocalData(exists ? current : [...current, expense]);
+    } else {
+        await setDoc(doc(db, 'wallets', activeWalletId, 'expenses', expense.id), expense);
+    }
+};
+
 export const clearAllExpenses = async (user: User, walletId: string) => {
     if (user.type === 'guest') {
         saveLocalData([]);
@@ -690,12 +669,12 @@ export const clearAllExpenses = async (user: User, walletId: string) => {
         }
     } else {
         try {
-            const expensesRef = db.collection('wallets').doc(walletId).collection('expenses');
-            const snapshot = await expensesRef.get();
+            const expensesRef = collection(db, 'wallets', walletId, 'expenses');
+            const snapshot = await getDocs(expensesRef);
             
-            const batch = db.batch();
-            snapshot.docs.forEach((doc) => {
-                batch.delete(doc.ref);
+            const batch = writeBatch(db);
+            snapshot.docs.forEach((docSnap) => {
+                batch.delete(docSnap.ref);
             });
             
             await batch.commit();
@@ -719,35 +698,40 @@ export const clearAllExpenses = async (user: User, walletId: string) => {
     }
 };
 
-export const subscribeToWalletExpenses = (walletId: string, callback: (e: Expense[]) => void) => {
-    return db.collection('wallets').doc(walletId)
-      .collection('expenses')
-      .orderBy('date', 'desc')
-      .limit(500)
-      .onSnapshot(
-        snapshot => {
-          const expenses = snapshot.docs.map(doc => doc.data() as Expense);
-          
-          if (import.meta.env.DEV) {
-              console.log('Expenses updated from Firestore:', expenses.length);
-          }
-          
-          callback(expenses);
-        }, 
-        (error) => {
-          if (import.meta.env.DEV) {
-              console.error("Firestore subscription error:", error.code, error.message);
-          }
-          
-          // If index is missing, provide helpful error
-          if (error.code === 'failed-precondition' && import.meta.env.DEV) {
-              console.error('Firestore index required. Please deploy indexes: npm run deploy:indexes');
-          }
-          
-          // Call callback with empty array on error to prevent UI crash
-          callback([]);
+export const subscribeToWalletExpenses = (
+    walletId: string,
+    callback: (e: Expense[]) => void,
+    onError?: (error: unknown) => void
+) => {
+    const expensesRef = collection(db, 'wallets', walletId, 'expenses');
+    const q = query(expensesRef, orderBy('date', 'desc'));
+    
+    return onSnapshot(
+      q,
+      snapshot => {
+        const expenses = snapshot.docs.map(doc => doc.data() as Expense);
+        
+        if (import.meta.env.DEV) {
+            console.log('Expenses updated from Firestore:', expenses.length);
         }
-      );
+        
+        callback(expenses);
+      },
+      (error) => {
+        if (import.meta.env.DEV) {
+            console.error("Firestore subscription error:", (error as any)?.code, (error as any)?.message);
+        }
+        
+        if ((error as any)?.code === 'failed-precondition' && import.meta.env.DEV) {
+            console.error('Firestore index required. Please deploy indexes: npm run deploy:indexes');
+        }
+        
+        // IMPORTANT: Never blank the list on a transient error (offline, permission
+        // blip, missing index). Keep the last known data and surface the error so the
+        // UI doesn't silently lose the user's expenses.
+        onError?.(error);
+      }
+    );
 };
 
 export const getGuestExpenses = (): Expense[] => {
@@ -764,13 +748,11 @@ export const syncGuestData = async (user: User) => {
     }
 
     try {
-        // Check if user already has a personal wallet
         const existingWallets = await getUserWallets(user);
         let personalWallet = existingWallets.find(w => w.isPersonal === true);
         
-        // If no personal wallet exists, create one
         if (!personalWallet) {
-            const personalWalletRef = db.collection('wallets').doc();
+            const personalWalletRef = doc(collection(db, 'wallets'));
             const newPersonalWallet: Wallet = {
                 id: personalWalletRef.id,
                 name: 'Personal Wallet',
@@ -780,18 +762,15 @@ export const syncGuestData = async (user: User) => {
                 createdAt: Date.now(),
                 isPersonal: true
             };
-            await personalWalletRef.set(newPersonalWallet);
+            await setDoc(personalWalletRef, newPersonalWallet);
             personalWallet = newPersonalWallet;
         }
 
-        // Sync guest expenses to the personal wallet
-        const batch = db.batch();
+        const batch = writeBatch(db);
         localData.forEach(p => {
-            const ref = db.collection('wallets').doc(personalWallet!.id).collection('expenses').doc(p.id);
-            // Remove type field if it exists (for backwards compatibility with old guest data)
-            const { type, ...expenseWithoutType } = p as any;
+            const ref = doc(db, 'wallets', personalWallet!.id, 'expenses', p.id);
             const expenseWithMeta: Expense = {
-                ...expenseWithoutType,
+                ...p,
                 walletId: personalWallet!.id,
                 createdBy: { uid: user.id, name: user.name }
             };
@@ -805,24 +784,70 @@ export const syncGuestData = async (user: User) => {
             console.log('Guest data synced to Firestore:', localData.length, 'expenses');
         }
 
-        // Cleanup any duplicate personal wallets after syncing
         await cleanupDuplicatePersonalWallets(user);
     } catch (error: any) {
         if (import.meta.env.DEV) {
             console.error('Error syncing guest data:', error);
         }
         
-        // Don't throw - allow user to continue even if sync fails
-        // Data remains in localStorage and can be synced later
         throw new Error('Failed to sync guest data. Your data is still saved locally.');
     }
 };
 
-export const getStoredBudget = (): number => {
-    const b = localStorage.getItem(MONTHLY_BUDGET_KEY);
-    return b ? parseFloat(b) : 20000;
+export const bulkImportExpenses = async (user: User, expenses: Expense[]): Promise<{ imported: number; skipped: number }> => {
+  if (user.type === 'guest') {
+    saveLocalData(expenses);
+    return { imported: expenses.length, skipped: 0 };
+  }
+
+  let imported = 0;
+  let skipped = 0;
+
+  for (const expense of expenses) {
+    try {
+      const expenseRef = doc(db, 'wallets', expense.walletId, 'expenses', expense.id);
+      const updatedExpense: Expense = {
+        ...expense,
+        createdBy: { uid: user.id, name: user.name }
+      };
+      await setDoc(expenseRef, updatedExpense, { merge: true });
+      imported++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  return { imported, skipped };
 };
 
-export const saveStoredBudget = (amount: number) => {
-    localStorage.setItem(MONTHLY_BUDGET_KEY, amount.toString());
+export const getStoredBudget = async (user: User | null, walletId: string | undefined): Promise<number> => {
+  if (user?.type === 'user' && walletId && walletId !== 'guest_wallet') {
+    try {
+      const walletRef = doc(db, 'wallets', walletId);
+      const walletSnap = await getDoc(walletRef);
+      if (walletSnap.exists()) {
+        const data = walletSnap.data();
+        if (typeof data.budget === 'number') {
+          return data.budget;
+        }
+      }
+    } catch {
+      // Fall through to localStorage
+    }
+  }
+  const b = localStorage.getItem(MONTHLY_BUDGET_KEY);
+  const parsed = b ? parseFloat(b) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 20000;
+};
+
+export const saveStoredBudget = async (user: User | null, walletId: string | undefined, amount: number) => {
+  localStorage.setItem(MONTHLY_BUDGET_KEY, amount.toString());
+  if (user?.type === 'user' && walletId && walletId !== 'guest_wallet') {
+    try {
+      const walletRef = doc(db, 'wallets', walletId);
+      await updateDoc(walletRef, { budget: amount });
+    } catch {
+      // Firestore write is best-effort; localStorage is the fallback
+    }
+  }
 };

@@ -30,26 +30,30 @@ export const generatePDFReport = (expenses: Expense[], stats: MonthlyStats, date
 
     doc.setFontSize(12);
     doc.setTextColor(50);
-    doc.text(`Rs. ${stats.currentMonthSpending.toLocaleString()}`, 20, 56);
+    const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
+    doc.text(`Rs. ${totalExpenses.toLocaleString()}`, 20, 56);
 
     // Table
     const tableData = expenses.map(e => [
         e.date,
         e.categoryName,
         e.note || '-',
-        `Rs. ${e.amount}`,
+        (e.tags && e.tags.length > 0) ? e.tags.join(', ') : '-',
+        `Rs. ${e.amount.toFixed(2)}`,
         e.createdBy?.name || 'Guest'
     ]);
 
     autoTable(doc, {
         startY: 70,
-        head: [['Date', 'Category', 'Note', 'Amount', 'Added By']],
+        head: [['Date', 'Category', 'Note', 'Tags', 'Amount', 'Added By']],
         body: tableData,
         theme: 'grid',
         headStyles: { fillColor: [16, 185, 129], textColor: 255, fontStyle: 'bold' },
         columnStyles: {
-            3: { fontStyle: 'bold', halign: 'right' }
-        }
+            4: { fontStyle: 'bold', halign: 'right' },
+            3: { fontSize: 8 } // Smaller font for tags
+        },
+        styles: { fontSize: 8, cellPadding: 2 }
     });
 
     // Footer

@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { Mail, Lock, ArrowRight, Loader2, UserPlus, X } from 'lucide-react';
 import { useStore } from '../context/StoreContext';
+import { useFocusTrap } from '../hooks/useFocusTrap';
+import { X, Loader2 } from 'lucide-react';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -9,264 +10,75 @@ interface AuthModalProps {
 }
 
 const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
-  const { login, signup, isLoading, resetPassword } = useAuth();
+  const { signInWithGoogle, isLoading } = useAuth();
   const { showNotification } = useStore();
-  
-  const [isLoginMode, setIsLoginMode] = useState(true);
-  const [isResetMode, setIsResetMode] = useState(false);
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [emailError, setEmailError] = useState('');
+  const modalRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(modalRef, isOpen);
 
   if (!isOpen) return null;
 
-  // Email validation
-  const validateEmail = (email: string): boolean => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
-
-  const handleEmailChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value;
-    setEmail(value);
-    
-    if (value && !validateEmail(value)) {
-      setEmailError('Please enter a valid email address');
-    } else {
-      setEmailError('');
-    }
-  };
-
-  const handlePasswordReset = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email) {
-      showNotification('error', 'Please enter your email address');
-      return;
-    }
-    
-    if (!validateEmail(email)) {
-      setEmailError('Please enter a valid email address');
-      return;
-    }
-    
+  const handleGoogleSignIn = async () => {
     try {
-      await resetPassword(email);
-      showNotification('success', 'Password reset email sent! Check your inbox.');
-      setIsResetMode(false);
-      setEmail('');
+      await signInWithGoogle();
+      showNotification('success', 'Signed in with Google');
+      onClose();
     } catch (error: any) {
-      let msg = 'Failed to send reset email';
-      if (error.code === 'auth/user-not-found') msg = 'No account found with this email';
-      if (error.code === 'auth/invalid-email') msg = 'Invalid email address';
-      if (error.code === 'auth/too-many-requests') msg = 'Too many requests. Please try again later';
-      showNotification('error', msg);
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!email || !password) return;
-    
-    // Validate email before submission
-    if (!validateEmail(email)) {
-      setEmailError('Please enter a valid email address');
-      return;
-    }
-    
-    try {
-        if (isLoginMode) {
-            await login(email, password);
-            showNotification('success', 'Welcome back!');
-        } else {
-            await signup(email, password);
-            showNotification('success', 'Account created successfully!');
-        }
-        onClose();
-        setEmail('');
-        setPassword('');
-        setEmailError('');
-    } catch (error: any) {
-        let msg = 'Authentication failed';
-        if (error.code === 'auth/invalid-credential') msg = 'Invalid email or password';
-        if (error.code === 'auth/email-already-in-use') msg = 'Email already in use';
-        if (error.code === 'auth/weak-password') msg = 'Password should be at least 6 characters';
-        if (error.code === 'auth/invalid-email') msg = 'Invalid email address';
-        showNotification('error', msg);
+      if (error.code !== 'auth/popup-closed-by-user') {
+        showNotification('error', 'Failed to sign in with Google');
+      }
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-x-hidden">
-      {/* Backdrop */}
-      <div 
-        className="absolute inset-0 bg-slate-900/60"
-        onClick={onClose}
-      />
-
-      {/* Modal */}
-      <div 
-        className="bg-white w-full max-w-sm rounded-xl p-4 shadow-2xl relative z-10 overflow-hidden max-w-full"
-        style={{
-          paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))',
-          paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))'
-        }}
-      >
+    <div className="fixed inset-0 z-auth flex items-center justify-center p-0 sm:p-4">
+      <div className="absolute inset-0 bg-slate-900/60" onClick={onClose} />
+      
+      <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="auth-title" className="bg-white w-full sm:max-w-sm rounded-t-xl sm:rounded-xl p-6 shadow-2xl relative z-10 mx-4 animate-slide-up-bottom sm:animate-scale-in" style={{
+        paddingTop: 'max(1.5rem, env(safe-area-inset-top, 0px))',
+        paddingBottom: 'max(1.5rem, env(safe-area-inset-bottom, 0px))'
+      }}>
+        <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mb-4 sm:hidden" />
+        
         <button 
-            onClick={onClose}
-            className="absolute top-3 right-3 p-1.5 bg-slate-100 rounded-lg active:scale-95"
+          onClick={onClose}
+          className="absolute top-3 right-3 min-w-[44px] min-h-[44px] bg-slate-100 rounded-xl active:scale-95 flex items-center justify-center hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
         >
-            <X size={18} className="text-slate-600" />
+          <X size={20} className="text-slate-600" />
         </button>
 
-        <div className="mb-4">
-            <h2 className="text-lg font-bold text-slate-900 mb-2">
-                {isResetMode ? 'Reset Password' : isLoginMode ? 'Welcome Back' : 'Create Account'}
-            </h2>
-            <p className="text-sm text-slate-600">
-                {isResetMode 
-                    ? 'Enter your email to receive a password reset link.'
-                    : isLoginMode 
-                    ? 'Log in to sync your data securely.' 
-                    : 'Join Kharcha Bachau to backup your data.'}
-            </p>
+        <div className="text-center mb-6">
+          <div className="w-16 h-16 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-4">
+            <span className="text-3xl">☁️</span>
+          </div>
+          <h2 id="auth-title" className="text-lg font-bold text-slate-900 mb-2">Back Up Your Data</h2>
+          <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
+            Sign in with Google to sync your expenses across devices. Your data stays private and secure.
+          </p>
         </div>
 
-        {isResetMode ? (
-          <form onSubmit={handlePasswordReset} className="space-y-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700 block">Email</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="email" 
-                  value={email}
-                  onChange={handleEmailChange}
-                  placeholder="name@example.com"
-                  className={`w-full bg-white border pl-10 pr-3 py-2.5 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 ${
-                    emailError ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20' : 'border-slate-200 focus:border-emerald-500 focus:ring-emerald-500/20'
-                  }`}
-                  required
-                />
-              </div>
-              {emailError && (
-                <p className="text-xs text-red-600">{emailError}</p>
-              )}
-            </div>
+        <button
+          onClick={handleGoogleSignIn}
+          disabled={isLoading}
+          className="w-full min-h-[48px] bg-white border-2 border-slate-200 rounded-xl text-sm font-semibold text-slate-800 flex items-center justify-center gap-3 active:scale-95 hover:border-slate-300 transition-all disabled:opacity-50 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+        >
+          {isLoading ? (
+            <Loader2 size={20} className="animate-spin" />
+          ) : (
+            <>
+              <svg width="20" height="20" viewBox="0 0 24 24" className="flex-shrink-0">
+                <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92a5.06 5.06 0 0 1-2.2 3.32v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.1z"/>
+                <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+              </svg>
+              <span>Continue with Google</span>
+            </>
+          )}
+        </button>
 
-            <button 
-              type="submit"
-              disabled={isLoading || !email || !!emailError}
-              className="w-full py-3 bg-emerald-600 text-white rounded-xl text-sm font-medium active:scale-95 flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoading ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <>
-                  <span>Send Reset Link</span>
-                  <ArrowRight size={16} />
-                </>
-              )}
-            </button>
-
-            <div className="mt-4 text-center">
-              <button 
-                type="button"
-                onClick={() => {
-                  setIsResetMode(false);
-                  setEmail('');
-                  setEmailError('');
-                }}
-                className="text-sm font-medium text-slate-600 active:scale-95"
-              >
-                Back to Login
-              </button>
-            </div>
-          </form>
-        ) : (
-          <form onSubmit={handleSubmit} className="space-y-3">
-            <div className="space-y-1.5">
-              <label className="text-[10px] font-bold text-gray-400 uppercase tracking-widest ml-1">Email</label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
-                <input 
-                  type="email" 
-                  value={email}
-                  onChange={handleEmailChange}
-                  placeholder="name@example.com"
-                  className={`w-full bg-gray-50 pl-10 pr-3 py-2.5 rounded-lg font-medium text-sm text-gray-900 focus:outline-none focus:bg-white focus:ring-2 transition-all border ${
-                    emailError ? 'border-red-300 focus:border-red-500 focus:ring-red-500/20' : 'border-transparent focus:border-green-500/50 focus:ring-green-500/20'
-                  }`}
-                  required
-                />
-              </div>
-              {emailError && (
-                <p className="text-xs text-red-500 ml-1">{emailError}</p>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium text-slate-700 block">Password</label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-                <input 
-                  type="password" 
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full bg-white border border-slate-200 pl-10 pr-3 py-2.5 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
-                  required
-                />
-              </div>
-            </div>
-
-            {isLoginMode && (
-              <div className="text-right">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setIsResetMode(true);
-                    setPassword('');
-                  }}
-                  className="text-sm font-medium text-emerald-600 active:scale-95"
-                >
-                  Forgot Password?
-                </button>
-              </div>
-            )}
-
-            <button 
-              type="submit"
-              disabled={isLoading || !email || !password || !!emailError}
-              className="w-full py-3 bg-emerald-600 text-white rounded-xl text-sm font-medium active:scale-95 flex items-center justify-center gap-2 mt-4 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isLoading ? (
-                <Loader2 size={18} className="animate-spin" />
-              ) : (
-                <>
-                  <span>{isLoginMode ? 'Log In' : 'Sign Up'}</span>
-                  {isLoginMode ? <ArrowRight size={16} /> : <UserPlus size={16} />}
-                </>
-              )}
-            </button>
-          </form>
-        )}
-
-        {!isResetMode && (
-          <div className="mt-4 text-center pt-4 border-t border-slate-100">
-            <button 
-              type="button"
-              onClick={() => {
-                setIsLoginMode(!isLoginMode);
-                setEmail('');
-                setPassword('');
-                setEmailError('');
-              }}
-              className="text-sm font-medium text-emerald-600 active:scale-95"
-            >
-              {isLoginMode ? "Don't have an account? Sign Up" : "Already have an account? Log In"}
-            </button>
-          </div>
-        )}
+        <p className="text-[11px] text-slate-500 text-center mt-4 leading-relaxed">
+          Your guest data will be synced to your account. You can continue as guest anytime.
+        </p>
       </div>
     </div>
   );

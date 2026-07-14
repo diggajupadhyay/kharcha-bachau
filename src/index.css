@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Plus Jakarta Sans', sans-serif;
+  --color-emerald-50: #ecfdf5;
+  --color-emerald-100: #d1fae5;
+  --color-emerald-200: #a7f3d0;
+  --color-emerald-300: #6ee7b7;
+  --color-emerald-400: #34d399;
+  --color-emerald-500: #10b981;
+  --color-emerald-600: #059669;
+  --color-emerald-700: #047857;
+  --color-rose-50: #fff1f2;
+  --color-rose-100: #ffe4e6;
+  --color-rose-200: #fecdd3;
+  --color-rose-300: #fda4af;
+  --color-rose-400: #fb7185;
+  --color-rose-500: #f43f5e;
+  --color-rose-600: #e11d48;
+  --color-rose-700: #be123c;
+}
+
+:root {
+  --safe-area-inset-top: env(safe-area-inset-top, 0px);
+  --safe-area-inset-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-area-inset-left: env(safe-area-inset-left, 0px);
+  --safe-area-inset-right: env(safe-area-inset-right, 0px);
+  --app-min-tap-target: 44px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #f8fafc;
+  font-family: 'Plus Jakarta Sans', sans-serif;
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior-y: none;
+}
+
+#root {
+  overflow-x: hidden;
+  width: 100%;
+  max-width: 100%;
+}
+
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* On desktop, show a slim scrollbar for discoverability (touch hides it) */
+@media (min-width: 1024px) {
+  .no-scrollbar {
+    -ms-overflow-style: auto;
+    scrollbar-width: thin;
+    scrollbar-color: #cbd5e1 transparent;
+  }
+  .no-scrollbar::-webkit-scrollbar { display: block; width: 8px; }
+  .no-scrollbar::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 9999px; }
+  .no-scrollbar::-webkit-scrollbar-track { background-color: transparent; }
+}
+
+/* Pointer affordance for mouse/desktop users */
+button:not(:disabled),
+a,
+[role="button"],
+summary { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+/* Minimum touch target for all interactive elements */
+.min-tap-target {
+  min-height: var(--app-min-tap-target);
+  min-width: var(--app-min-tap-target);
+}
+
+/* Prevent iOS zoom on input focus */
+input, select, textarea { font-size: 16px; }
+
+input[type='number']::-webkit-inner-spin-button,
+input[type='number']::-webkit-outer-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-up-bottom {
+  animation: slideUpBottom 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-scale-in {
+  animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideUp {
+  from { transform: translateY(30px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+@keyframes slideUpBottom {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+@keyframes scaleIn {
+  from { transform: scale(0.95); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+
+/* Responsive font-size clamp utility */
+.text-clamp-sm { font-size: clamp(0.75rem, 2.5vw, 0.875rem); }
+.text-clamp-base { font-size: clamp(0.875rem, 3vw, 1rem); }
+.text-clamp-lg { font-size: clamp(1rem, 3.5vw, 1.25rem); }
+.text-clamp-xl { font-size: clamp(1.25rem, 4vw, 1.5rem); }
+.text-clamp-2xl { font-size: clamp(1.5rem, 5vw, 2rem); }
+.text-clamp-3xl { font-size: clamp(1.875rem, 6vw, 2.5rem); }
+
+/* Explicit z-index scale for overlays (modals, dialogs, notifications) */
+@utility z-modal { z-index: 140; }
+@utility z-import { z-index: 145; }
+@utility z-auth { z-index: 150; }
+@utility z-notification { z-index: 160; }
+
+/* Respect users who prefer reduced motion — disable modal/transition animations */
+@media (prefers-reduced-motion: reduce) {
+  .animate-fade-in,
+  .animate-slide-up,
+  .animate-slide-up-bottom,
+  .animate-scale-in {
+    animation: none !important;
+  }
+}

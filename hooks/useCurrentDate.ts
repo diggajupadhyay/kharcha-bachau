@@ -1,19 +1,15 @@
 import { useState, useEffect, useMemo } from 'react';
+import { todayISO } from '../utils/date';
 
 /**
- * Hook that returns the current date in YYYY-MM-DD format
+ * Hook that returns the current date in YYYY-MM-DD format (local time)
  * Recalculates once per day (at midnight) to avoid unnecessary updates
  */
 export const useCurrentDate = (): string => {
-  const [currentDate, setCurrentDate] = useState(() => {
-    return new Date().toISOString().split('T')[0];
-  });
+  const [currentDate, setCurrentDate] = useState(() => todayISO());
 
   useEffect(() => {
-    const updateDate = () => {
-      const today = new Date().toISOString().split('T')[0];
-      setCurrentDate(today);
-    };
+    const updateDate = () => setCurrentDate(todayISO());
 
     // Update date at midnight
     const now = new Date();
@@ -21,10 +17,8 @@ export const useCurrentDate = (): string => {
     midnight.setHours(24, 0, 0, 0);
     const msUntilMidnight = midnight.getTime() - now.getTime();
 
-    // Set timeout for next midnight
     const timeoutId = setTimeout(() => {
       updateDate();
-      // Then update every 24 hours
       const intervalId = setInterval(updateDate, 24 * 60 * 60 * 1000);
       return () => clearInterval(intervalId);
     }, msUntilMidnight);
@@ -40,8 +34,6 @@ export const useCurrentDate = (): string => {
  * Use this for components that need current date but don't need real-time updates
  */
 export const useCurrentDateMemo = (): string => {
-  return useMemo(() => {
-    return new Date().toISOString().split('T')[0];
-  }, []); // Only calculate once on mount
+  return useMemo(() => todayISO(), []); // Only calculate once on mount
 };
 

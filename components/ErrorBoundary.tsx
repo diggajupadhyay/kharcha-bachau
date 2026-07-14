@@ -46,28 +46,28 @@ class ErrorBoundary extends Component<Props, State> {
   render() {
     if (this.state.hasError) {
       return (
-        <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
+        <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
           <div className="max-w-md w-full bg-white rounded-2xl shadow-lg p-8 text-center">
             <div className="flex justify-center mb-4">
-              <div className="p-3 bg-red-100 rounded-full">
-                <AlertCircle className="text-red-600" size={32} />
+              <div className="p-3 bg-rose-100 rounded-full">
+                <AlertCircle className="text-rose-600" size={32} />
               </div>
             </div>
             
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
+            <h1 className="text-2xl font-bold text-slate-900 mb-2">
               Something went wrong
             </h1>
             
-            <p className="text-gray-600 mb-6">
+            <p className="text-slate-600 mb-6">
               We're sorry, but something unexpected happened. Please try refreshing the page.
             </p>
 
             {import.meta.env.DEV && this.state.error && (
               <details className="mb-6 text-left">
-                <summary className="cursor-pointer text-sm text-gray-500 mb-2">
+                <summary className="cursor-pointer text-sm text-slate-500 mb-2">
                   Error details (dev only)
                 </summary>
-                <pre className="text-xs bg-gray-100 p-3 rounded overflow-auto max-h-40">
+                <pre className="text-xs bg-slate-100 p-3 rounded overflow-auto max-h-40">
                   {this.state.error.toString()}
                   {this.state.error.stack && (
                     <>
@@ -81,7 +81,7 @@ class ErrorBoundary extends Component<Props, State> {
 
             <button
               onClick={this.handleReset}
-              className="w-full bg-emerald-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-emerald-700 transition-colors flex items-center justify-center gap-2"
+              className="w-full bg-emerald-600 text-white px-6 py-3 rounded-xl font-semibold hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 flex items-center justify-center gap-2"
             >
               <RefreshCw size={20} />
               Try Again
@@ -89,7 +89,7 @@ class ErrorBoundary extends Component<Props, State> {
 
             <button
               onClick={() => window.location.reload()}
-              className="w-full mt-3 bg-gray-100 text-gray-700 px-6 py-3 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+              className="w-full mt-3 bg-slate-100 text-slate-700 px-6 py-3 rounded-xl font-semibold hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
             >
               Reload Page
             </button>

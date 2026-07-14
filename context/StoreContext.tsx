@@ -1,16 +1,26 @@
 
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { StoreContextType, Expense, Notification, NotificationType, Language, Category, MonthlyStats, PieChartData, Wallet, SplitDetails } from '../types';
+import { StoreContextType, Expense, Notification, NotificationType, Category, MonthlyStats, Wallet, SplitDetails } from '../types';
 import * as storage from '../services/storageService';
 import { useAuth } from './AuthContext';
-import { startOfMonth, subMonths, endOfMonth, format } from 'date-fns';
+import { format } from 'date-fns';
 import { EXPENSE_CATEGORIES } from '../constants';
+import { AppNotification, getAllNotifications } from '../services/notificationService';
+import { calculateMemberBalances } from '../utils/balances';
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 const ACTIVE_WALLET_KEY = 'kharcha_bachau_active_wallet_id';
-const LANGUAGE_KEY = 'kharcha_bachau_language';
 const CUSTOM_CATEGORIES_KEY = 'kharcha_bachau_custom_categories';
+const READ_NOTIFICATIONS_KEY = 'kharcha_bachau_read_notifications';
+const DISMISSED_NOTIFICATIONS_KEY = 'kharcha_bachau_dismissed_notifications';
+
+const pad2 = (n: number) => String(n).padStart(2, '0');
+const isoMonthStart = (year: number, month0: number) => `${year}-${pad2(month0 + 1)}-01`;
+const isoMonthEnd = (year: number, month0: number) => {
+  const lastDay = new Date(year, month0 + 1, 0).getDate();
+  return `${year}-${pad2(month0 + 1)}-${pad2(lastDay)}`;
+};
 
 export const useStore = () => {
   const context = useContext(StoreContext);
@@ -22,21 +32,32 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const { user } = useAuth();
   
   // App State
-  const [language, setLanguageState] = useState<Language>(() => {
-    const saved = localStorage.getItem(LANGUAGE_KEY);
-    return (saved === 'en' || saved === 'np') ? saved : 'en';
-  });
-  
-  const setLanguage = useCallback((lang: Language) => {
-    setLanguageState(lang);
-  }, []);
-  
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  
-  // Persist language to localStorage
-  useEffect(() => {
-    localStorage.setItem(LANGUAGE_KEY, language);
-  }, [language]);
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
+  const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_KEY) || '[]'));
+    } catch {
+      return new Set<string>();
+    }
+  });
+  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<Set<string>>(() => {
+    try {
+      return new Set(JSON.parse(localStorage.getItem(DISMISSED_NOTIFICATIONS_KEY) || '[]'));
+    } catch {
+      return new Set<string>();
+    }
+  });
+
+  const persistReadIds = useCallback((ids: Set<string>) => {
+    setReadNotificationIds(ids);
+    localStorage.setItem(READ_NOTIFICATIONS_KEY, JSON.stringify([...ids]));
+  }, []);
+
+  const persistDismissedIds = useCallback((ids: Set<string>) => {
+    setDismissedNotificationIds(ids);
+    localStorage.setItem(DISMISSED_NOTIFICATIONS_KEY, JSON.stringify([...ids]));
+  }, []);
   
   // Clean up old country key from localStorage
   useEffect(() => {
@@ -64,6 +85,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budget, setBudgetState] = useState(20000);
   const [customCategories, setCustomCategoriesState] = useState<Category[]>([]);
+  const [isSyncing, setIsSyncing] = useState(true);
   
   // Derived Stats
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats>({
@@ -71,16 +93,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       lastMonthSpending: 0,
       percentChange: 0
   });
-  const [pieChartData, setPieChartData] = useState<PieChartData[]>([]);
 
   useEffect(() => {
-      setBudgetState(storage.getStoredBudget());
-  }, []);
+    const loadBudget = async () => {
+      const saved = await storage.getStoredBudget(user, activeWallet?.id);
+      setBudgetState(saved);
+    };
+    loadBudget();
+  }, [user, activeWallet]);
 
   const setBudget = useCallback((amount: number) => {
       setBudgetState(amount);
-      storage.saveStoredBudget(amount);
-  }, []);
+      storage.saveStoredBudget(user, activeWallet?.id, amount);
+  }, [user, activeWallet?.id]);
 
   useEffect(() => {
       if (!user) {
@@ -146,79 +171,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       loadWallets();
   }, [user]);
 
-  useEffect(() => {
-      if (!user || !activeWallet) {
-          setExpenses([]);
-          return;
-      }
-
-      if (user.type === 'guest') {
-          setExpenses(storage.getGuestExpenses());
-      } else {
-          const unsubscribe = storage.subscribeToWalletExpenses(activeWallet.id, (data) => {
-              setExpenses(data);
-          });
-          return () => unsubscribe();
-      }
-  }, [user, activeWallet]);
-
-  // Memoize month boundaries to avoid recalculating on every expense change
-  const monthBoundaries = useMemo(() => {
-      const now = new Date();
-      return {
-          currentMonthStart: startOfMonth(now),
-          currentMonthEnd: endOfMonth(now),
-          lastMonthStart: startOfMonth(subMonths(now, 1)),
-          lastMonthEnd: endOfMonth(subMonths(now, 1))
-      };
-  }, []); // Only recalculate once per mount (could add day tracking for month changes)
-
-  useEffect(() => {
-      let currentMonthExpense = 0;
-      let lastMonthExpense = 0;
-      
-      const categoryTotals: Record<string, number> = {};
-
-      expenses.forEach(e => {
-          const d = new Date(e.date);
-          const amount = e.amount;
-
-          if (d >= monthBoundaries.currentMonthStart && d <= monthBoundaries.currentMonthEnd) {
-              currentMonthExpense += amount;
-              categoryTotals[e.categoryId] = (categoryTotals[e.categoryId] || 0) + amount;
-          } else if (d >= monthBoundaries.lastMonthStart && d <= monthBoundaries.lastMonthEnd) {
-              lastMonthExpense += amount;
-          }
-      });
-      
-      let percentChange = 0;
-      if (lastMonthExpense > 0) {
-          percentChange = ((currentMonthExpense - lastMonthExpense) / lastMonthExpense) * 100;
-      } else if (currentMonthExpense > 0) {
-          percentChange = 100; 
-      }
-
-      setMonthlyStats({
-          currentMonthSpending: currentMonthExpense,
-          lastMonthSpending: lastMonthExpense,
-          percentChange
-      });
-
-      const chartData: PieChartData[] = Object.keys(categoryTotals)
-        .map(catId => {
-          const cat = EXPENSE_CATEGORIES.find(c => c.id === catId);
-          const name = cat ? (language === 'en' ? cat.name : cat.name_np) : 'Other';
-          const emoji = cat?.emoji || '📝';
-          return { name, value: categoryTotals[catId], color: 'gray', emoji };
-        })
-        .filter(item => item.value > 0)
-        .sort((a, b) => b.value - a.value);
-
-      setPieChartData(chartData);
-
-  }, [expenses, language, monthBoundaries]);
-
-  // Notification functions - defined early since other functions depend on them
+  // Notification/haptic helpers — defined before the subscription effect that uses them
   const showNotification = useCallback((type: NotificationType, message: string) => {
     const id = Math.random().toString(36).substr(2, 9);
     setNotifications(prev => [...prev, { id, type, message }]);
@@ -232,6 +185,136 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const triggerHaptic = useCallback(() => {
     if (navigator.vibrate) navigator.vibrate(10);
   }, []);
+
+  useEffect(() => {
+      if (!user || !activeWallet) {
+          setExpenses([]);
+          setIsSyncing(false);
+          return;
+      }
+
+      if (user.type === 'guest') {
+          setExpenses(storage.getGuestExpenses());
+          setIsSyncing(false);
+      } else {
+          setIsSyncing(true);
+          const unsubscribe = storage.subscribeToWalletExpenses(
+            activeWallet.id,
+            (data) => {
+              setExpenses(data);
+              setIsSyncing(false);
+            },
+            () => {
+              // Transient sync error — keep last known expenses, just notify.
+              setIsSyncing(false);
+              showNotification('error', 'Sync issue — showing last saved data');
+            }
+          );
+          return () => unsubscribe();
+      }
+  }, [user, activeWallet, showNotification]);
+
+  useEffect(() => {
+      const now = new Date();
+      const y = now.getFullYear();
+      const m = now.getMonth();
+
+      const monthStartStr = isoMonthStart(y, m);
+      const monthEndStr = isoMonthEnd(y, m);
+      const lm = m === 0 ? 11 : m - 1;
+      const ly = m === 0 ? y - 1 : y;
+      const lmStartStr = isoMonthStart(ly, lm);
+      const lmEndStr = isoMonthEnd(ly, lm);
+
+      let currentMonthExpense = 0;
+      let lastMonthExpense = 0;
+
+      // Compare date-only strings (YYYY-MM-DD) lexicographically — TZ-safe
+      expenses.forEach(e => {
+          if (e.date >= monthStartStr && e.date <= monthEndStr) {
+              currentMonthExpense += e.amount;
+          } else if (e.date >= lmStartStr && e.date <= lmEndStr) {
+              lastMonthExpense += e.amount;
+          }
+      });
+      
+      let percentChange = 0;
+      if (lastMonthExpense > 0) {
+          percentChange = ((currentMonthExpense - lastMonthExpense) / lastMonthExpense) * 100;
+      } else if (currentMonthExpense > 0) {
+          percentChange = 100; 
+      }
+
+      setMonthlyStats({
+          currentMonthSpending: Math.round(currentMonthExpense * 100) / 100,
+          lastMonthSpending: Math.round(lastMonthExpense * 100) / 100,
+          percentChange
+      });
+
+    }, [expenses]);
+
+  // Check app notifications periodically
+  useEffect(() => {
+    if (!user || !activeWallet) {
+      setAppNotifications([]);
+      return;
+    }
+    
+    const checkNotifications = () => {
+      const currentDate = format(new Date(), 'yyyy-MM-dd');
+      const newNotifications = getAllNotifications(
+        expenses,
+        monthlyStats.currentMonthSpending,
+        budget,
+        user.id,
+        currentDate
+      );
+      // Respect persisted read/dismissed state
+      const visible = newNotifications
+        .filter(n => !dismissedNotificationIds.has(n.id))
+        .map(n => ({ ...n, read: readNotificationIds.has(n.id) }));
+      setAppNotifications(visible);
+    };
+    
+    // Check immediately
+    checkNotifications();
+    
+    // Check every 5 minutes
+    const interval = setInterval(checkNotifications, 5 * 60 * 1000);
+    
+    return () => clearInterval(interval);
+  }, [user, activeWallet, expenses, monthlyStats.currentMonthSpending, budget, readNotificationIds, dismissedNotificationIds]);
+  
+  const updateAppNotifications = useCallback((notifications: AppNotification[]) => {
+    // Re-apply persisted read/dismissed state when the list is replaced externally
+    const visible = notifications
+      .filter(n => !dismissedNotificationIds.has(n.id))
+      .map(n => ({ ...n, read: readNotificationIds.has(n.id) }));
+    setAppNotifications(visible);
+  }, [readNotificationIds, dismissedNotificationIds]);
+
+  const markAppNotificationRead = useCallback((id: string) => {
+    const next = new Set(readNotificationIds);
+    next.add(id);
+    persistReadIds(next);
+    setAppNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+  }, [readNotificationIds, persistReadIds]);
+
+  const dismissAppNotification = useCallback((id: string) => {
+    const next = new Set(dismissedNotificationIds);
+    next.add(id);
+    persistDismissedIds(next);
+    setAppNotifications(prev => prev.filter(n => n.id !== id));
+  }, [dismissedNotificationIds, persistDismissedIds]);
+
+  const markAllAppNotificationsRead = useCallback(() => {
+    setAppNotifications(prev => {
+      const next = new Set(readNotificationIds);
+      prev.forEach(n => next.add(n.id));
+      persistReadIds(next);
+      return prev.map(n => ({ ...n, read: true }));
+    });
+  }, [readNotificationIds, persistReadIds]);
 
   const switchWallet = useCallback((walletId: string) => {
       const wallet = wallets.find(w => w.id === walletId);
@@ -319,7 +402,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [user, createNewWallet, showNotification]);
 
-  const addExpense = useCallback(async (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => {
+  const addExpense = useCallback(async (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => {
     if (!user || !activeWallet) return;
     try {
         const dateStr = date ? format(date, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
@@ -330,7 +413,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             amount,
             note,
             date: dateStr,
-            splitDetails
+            splitDetails,
+            tags: tags && tags.length > 0 ? tags.map(t => t.trim().toLowerCase()).filter(t => t.length > 0 && t.length <= 20) : undefined,
+            transportDetails
         });
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
         showNotification('success', 'Expense added');
@@ -344,10 +429,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [user, activeWallet, showNotification, triggerHaptic]);
 
-  const updateExpense = useCallback(async (id: string, amount: number, note: string) => {
+  const updateExpense = useCallback(async (id: string, amount: number, note: string, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => {
     if (!user || !activeWallet) return;
     try {
-        await storage.updateExpense(user, activeWallet.id, id, { amount, note });
+        const updates: Partial<Expense> = { amount, note };
+        if (tags !== undefined) {
+            updates.tags = tags.length > 0 ? tags.map(t => t.trim().toLowerCase()).filter(t => t.length > 0 && t.length <= 20) : undefined;
+        }
+        if (transportDetails !== undefined) {
+            updates.transportDetails = transportDetails;
+        }
+        await storage.updateExpense(user, activeWallet.id, id, updates);
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
         showNotification('success', 'Updated successfully');
         triggerHaptic();
@@ -375,52 +467,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [user, activeWallet, showNotification]);
 
+  const restoreExpense = useCallback(async (expense: Expense) => {
+      if (!user || !activeWallet) return;
+      try {
+          await storage.restoreExpense(user, activeWallet.id, expense);
+          if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
+          showNotification('success', 'Restored');
+          triggerHaptic();
+      } catch (e: any) {
+          const errorMsg = e?.message || 'Failed to restore';
+          showNotification('error', errorMsg);
+      }
+  }, [user, activeWallet, showNotification, triggerHaptic]);
+
   // Calculate member balances from expenses
   const getMemberBalances = useCallback((): Record<string, number> => {
     if (!activeWallet || !expenses.length) return {};
-    
-    const balances: Record<string, number> = {};
-    
-    // Initialize balances for all members
-    activeWallet.members.forEach(memberId => {
-      balances[memberId] = 0;
-    });
-    
-    // Calculate balances from split expenses (accounting for settlements)
-    expenses.forEach(expense => {
-      if (expense.splitDetails) {
-        const { paidBy, participants, settlements = [] } = expense.splitDetails;
-        
-        // Person who paid gets credited with the full amount
-        if (balances[paidBy] !== undefined) {
-          balances[paidBy] += expense.amount;
-        }
-        
-        // Participants owe their share
-        participants.forEach(participant => {
-          if (balances[participant.userId] !== undefined) {
-            // Check if this participant's debt has been settled
-            const settlement = settlements.find(
-              s => s.fromUserId === participant.userId && s.toUserId === paidBy
-            );
-            
-            if (!settlement) {
-              // Not settled: participant owes the amount
-              balances[participant.userId] -= participant.amount;
-            } else {
-              // Settled: participant has paid, so don't subtract from their balance
-              // Instead, reduce the payer's balance by the settled amount (they got paid back)
-              if (balances[paidBy] !== undefined) {
-                balances[paidBy] -= settlement.amount;
-              }
-              // Participant's balance remains unchanged (they've cleared their debt)
-            }
-          }
-        });
-      }
-    });
-    
-    return balances;
+    return calculateMemberBalances(activeWallet, expenses);
   }, [activeWallet, expenses]);
 
   // Load custom categories from Firestore/localStorage
@@ -620,21 +683,23 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [user, activeWallet, expenses, showNotification, triggerHaptic, setExpenses]);
 
   const contextValue = useMemo(() => ({
-    language, setLanguage,
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
-    expenses, budget, setBudget, monthlyStats, pieChartData,
-    addExpense, updateExpense, deleteExpense, setExpenses,
+    expenses, budget, setBudget, monthlyStats, isSyncing,
+    addExpense, updateExpense, deleteExpense, restoreExpense, setExpenses,
     getMemberBalances, markSettlement,
     customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories,
-    notifications, showNotification, dismissNotification, triggerHaptic
+    notifications, showNotification, dismissNotification, triggerHaptic,
+    appNotifications, updateAppNotifications,
+    markAppNotificationRead, dismissAppNotification, markAllAppNotificationsRead
   }), [
-    language, setLanguage,
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
-    expenses, budget, setBudget, monthlyStats, pieChartData,
-    addExpense, updateExpense, deleteExpense,
+    expenses, budget, setBudget, monthlyStats, isSyncing,
+    addExpense, updateExpense, deleteExpense, restoreExpense,
     getMemberBalances, markSettlement,
     customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories,
-    notifications, showNotification, dismissNotification, triggerHaptic
+    notifications, showNotification, dismissNotification, triggerHaptic,
+    appNotifications, updateAppNotifications,
+    markAppNotificationRead, dismissAppNotification, markAllAppNotificationsRead
   ]);
 
   return (
