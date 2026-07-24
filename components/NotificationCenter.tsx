@@ -1,7 +1,7 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useMemo, useRef } from 'react';
 import { X, Bell, AlertCircle, Info, AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { useFocusTrap } from '../hooks/useFocusTrap';
-import { AppNotification, NotificationPreferences, getNotificationPreferences, saveNotificationPreferences } from '../services/notificationService';
+import { AppNotification } from '../services/notificationService';
 import { useStore } from '../context/StoreContext';
 
 interface NotificationCenterProps {
@@ -15,8 +15,6 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
 }) => {
   const { appNotifications, markAppNotificationRead, dismissAppNotification, markAllAppNotificationsRead } = useStore();
   const notifications = appNotifications;
-  const [preferences, setPreferences] = useState<NotificationPreferences>(getNotificationPreferences());
-  const [showPreferences, setShowPreferences] = useState(false);
   
   const modalRef = useRef<HTMLDivElement>(null);
   useFocusTrap(modalRef, isOpen);
@@ -29,12 +27,6 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
   
   const handleDismiss = (id: string) => {
     dismissAppNotification(id);
-  };
-
-  const handlePreferenceChange = (key: keyof NotificationPreferences, value: any) => {
-    const updated = { ...preferences, [key]: value };
-    setPreferences(updated);
-    saveNotificationPreferences(updated);
   };
   
   const getSeverityIcon = (severity: AppNotification['severity']) => {
@@ -92,35 +84,11 @@ const NotificationCenter: React.FC<NotificationCenterProps> = ({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowPreferences(!showPreferences)} className="min-w-[44px] min-h-[44px] text-slate-600 hover:bg-slate-100 rounded-xl active:scale-95 flex items-center justify-center transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500" aria-label="Preferences">
-              <CheckCircle2 size={20} />
-            </button>
             <button onClick={onClose} className="min-w-[44px] min-h-[44px] text-slate-600 hover:bg-slate-100 rounded-xl active:scale-95 flex items-center justify-center transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500" aria-label="Close">
               <X size={20} />
             </button>
           </div>
         </div>
-        
-        {/* Preferences Panel */}
-        {showPreferences && (
-          <div className="px-4 sm:px-6 py-4 border-b border-slate-200 bg-slate-50 flex-shrink-0">
-            <h3 className="text-sm font-semibold text-slate-900 mb-3">Notification Preferences</h3>
-            <div className="space-y-3">
-              <label className="flex items-center justify-between min-h-[44px] px-3 bg-white rounded-lg cursor-pointer">
-                <span className="text-sm text-slate-700">Budget Alerts</span>
-                <input type="checkbox" checked={preferences.budgetAlerts} onChange={(e) => handlePreferenceChange('budgetAlerts', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-              </label>
-              <label className="flex items-center justify-between min-h-[44px] px-3 bg-white rounded-lg cursor-pointer">
-                <span className="text-sm text-slate-700">Settlement Reminders</span>
-                <input type="checkbox" checked={preferences.settlementReminders} onChange={(e) => handlePreferenceChange('settlementReminders', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-              </label>
-              <label className="flex items-center justify-between min-h-[44px] px-3 bg-white rounded-lg cursor-pointer">
-                <span className="text-sm text-slate-700">Daily Reminders</span>
-                <input type="checkbox" checked={preferences.dailyReminders} onChange={(e) => handlePreferenceChange('dailyReminders', e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500" />
-              </label>
-            </div>
-          </div>
-        )}
         
         {/* Notifications List */}
         <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-4 space-y-2">

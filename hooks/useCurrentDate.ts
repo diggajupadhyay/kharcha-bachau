@@ -17,13 +17,16 @@ export const useCurrentDate = (): string => {
     midnight.setHours(24, 0, 0, 0);
     const msUntilMidnight = midnight.getTime() - now.getTime();
 
+    let intervalId: ReturnType<typeof setInterval> | undefined;
     const timeoutId = setTimeout(() => {
       updateDate();
-      const intervalId = setInterval(updateDate, 24 * 60 * 60 * 1000);
-      return () => clearInterval(intervalId);
+      intervalId = setInterval(updateDate, 24 * 60 * 60 * 1000);
     }, msUntilMidnight);
 
-    return () => clearTimeout(timeoutId);
+    return () => {
+      clearTimeout(timeoutId);
+      if (intervalId) clearInterval(intervalId);
+    };
   }, []);
 
   return currentDate;

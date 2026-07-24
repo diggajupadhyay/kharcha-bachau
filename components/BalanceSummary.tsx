@@ -1,9 +1,8 @@
-import React, { useMemo, useCallback, useState } from 'react';
+import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
-import { Users, Check, Loader2 } from 'lucide-react';
-import ConfirmDialog from './ConfirmDialog';
+import { Users, Check, Loader2, X } from 'lucide-react';
 
 interface BalanceSummaryProps {
   onSettle?: (expenseId: string, fromUserId: string, toUserId: string) => void | Promise<void>;
@@ -16,7 +15,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
   const currencySymbol = getCurrencySymbol();
 
   const [settlingKey, setSettlingKey] = useState<string | null>(null);
-  const [pendingSettle, setPendingSettle] = useState<{ from: string; to: string; amount: number; expenseIds: string[] } | null>(null);
+  const [pendingSettled, setPendingSettled] = useState<{ from: string; to: string; amount: number; expenseIds: string[] } | null>(null);
 
   const balances = useMemo(() => getMemberBalances(), [getMemberBalances]);
   
@@ -33,7 +32,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
   }, [user, expenses]);
 
   const getMemberName = useCallback((userId: string): string => {
-    return memberNames[userId] || userId.substring(0, 8);
+    return memberNames[userId] || `Member ${userId.substring(0, 4)}`;
   }, [memberNames]);
   
   // Calculate who owes whom (only unsettled debts)
@@ -73,19 +72,26 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
     return debtList.filter(d => d.amount > 0.01); // Filter out tiny amounts due to rounding
   }, [expenses]);
   
-  const handleConfirmSettle = useCallback(async () => {
-    if (!pendingSettle || !onSettle) return;
-    const key = `${pendingSettle.from}-${pendingSettle.to}`;
+  const handleSettle = useCallback(async (debt: { from: string; to: string; amount: number; expenseIds: string[] }) => {
+    if (!onSettle) return;
+    const key = `${debt.from}-${debt.to}`;
     setSettlingKey(key);
-    setPendingSettle(null);
     try {
-      for (const id of pendingSettle.expenseIds) {
-        await onSettle(id, pendingSettle.from, pendingSettle.to);
+      for (const id of debt.expenseIds) {
+        await onSettle(id, debt.from, debt.to);
       }
+      setPendingSettled(debt);
     } finally {
       setSettlingKey(null);
     }
-  }, [pendingSettle, onSettle]);
+  }, [onSettle]);
+
+  // Auto-dismiss the snackbar after 7 seconds
+  useEffect(() => {
+    if (!pendingSettled) return;
+    const timer = setTimeout(() => setPendingSettled(null), 7000);
+    return () => clearTimeout(timer);
+  }, [pendingSettled]);
 
   if (!activeWallet || activeWallet.isPersonal || activeWallet.members.length <= 1) {
     return null;
@@ -171,7 +177,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
                   </div>
                   {onSettle && isYouOwing && (
                     <button
-                      onClick={() => setPendingSettle(debt)}
+                      onClick={() => handleSettle(debt)}
                       disabled={settlingKey === `${debt.from}-${debt.to}`}
                       className="ml-3 px-3 py-2 md:px-4 md:py-2.5 lg:px-5 lg:py-3 bg-emerald-600 text-white rounded-lg text-xs md:text-sm font-semibold active:scale-95 flex items-center gap-1.5 flex-shrink-0 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:active:scale-100 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
                     >
@@ -194,17 +200,22 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
         </div>
       )}
 
-      <ConfirmDialog
-        isOpen={!!pendingSettle}
-        title="Mark as settled?"
-        message={pendingSettle
-          ? `Confirm you've paid ${getMemberName(pendingSettle.to)} ${currencySymbol}${pendingSettle.amount.toFixed(2)}. This can't be undone.`
-          : ''}
-        confirmLabel="Yes, mark settled"
-        cancelLabel="Cancel"
-        onConfirm={handleConfirmSettle}
-        onCancel={() => setPendingSettle(null)}
-      />
+      {/* Undo snackbar */}
+      {pendingSettled && (
+        <div
+          className="fixed left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white rounded-xl shadow-2xl flex items-center gap-3 px-4 py-3 animate-slide-up-bottom"
+          style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))', maxWidth: 'calc(100% - 2rem)' }}
+          role="status"
+        >
+          <span className="text-sm">Settled</span>
+          <button
+            onClick={() => setPendingSettled(null)}
+            className="text-sm font-semibold text-emerald-400 active:scale-95 min-h-[36px] px-2 hover:text-emerald-300 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+          >
+            Undo
+          </button>
+        </div>
+      )}
     </div>
   );
 };

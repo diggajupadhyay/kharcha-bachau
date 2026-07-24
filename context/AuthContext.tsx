@@ -1,7 +1,8 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, AuthContextType } from '../types';
 import { auth } from '../services/firebase';
-import { onAuthStateChanged, signOut, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
+import * as storage from '../services/storageService';
+import { onAuthStateChanged, signOut, signInWithPopup, GoogleAuthProvider, deleteUser } from 'firebase/auth';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -14,7 +15,6 @@ export const useAuth = () => {
 };
 
 const GUEST_STORAGE_KEY = 'kharcha_bachau_guest_v1';
-const OLD_GUEST_STORAGE_KEY = 'veggie_nepal_guest_v1';
 
 const googleProvider = new GoogleAuthProvider();
 
@@ -33,25 +33,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   useEffect(() => {
-    const oldGuestData = localStorage.getItem(OLD_GUEST_STORAGE_KEY);
-    if (oldGuestData) {
-      try {
-        localStorage.setItem(GUEST_STORAGE_KEY, oldGuestData);
-        localStorage.removeItem(OLD_GUEST_STORAGE_KEY);
-        if (import.meta.env.DEV) {
-          console.log('Migrated guest data from old storage key');
-        }
-      } catch (error) {
-        if (import.meta.env.DEV) {
-          console.error('Error migrating guest data:', error);
-        }
-      }
-    }
-
     const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
       if (firebaseUser) {
         localStorage.removeItem(GUEST_STORAGE_KEY);
-        localStorage.removeItem(OLD_GUEST_STORAGE_KEY);
         setUser({
           id: firebaseUser.uid,
           name: firebaseUser.displayName || (firebaseUser.email ? firebaseUser.email.split('@')[0] : 'User'),
@@ -61,16 +45,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         });
         setIsLoading(false);
       } else {
-        let guestData = localStorage.getItem(GUEST_STORAGE_KEY);
-        
-        if (!guestData) {
-          guestData = localStorage.getItem(OLD_GUEST_STORAGE_KEY);
-          if (guestData) {
-            localStorage.setItem(GUEST_STORAGE_KEY, guestData);
-            localStorage.removeItem(OLD_GUEST_STORAGE_KEY);
-          }
-        }
-        
+        const guestData = localStorage.getItem(GUEST_STORAGE_KEY);
+
         if (guestData) {
             try {
               setUser(JSON.parse(guestData));
@@ -119,7 +95,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
         await signOut(auth);
         localStorage.removeItem(GUEST_STORAGE_KEY);
-        localStorage.removeItem(OLD_GUEST_STORAGE_KEY);
         continueAsGuest();
     } catch (error) {
         if (import.meta.env.DEV) {
@@ -128,8 +103,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const deleteAccount = async () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      // No Firebase account (guest): just clear local data.
+      await storage.deleteAccount({
+        id: 'guest',
+        name: 'Guest',
+        type: 'guest',
+        email: '',
+        createdAt: Date.now()
+      });
+      continueAsGuest();
+      return;
+    }
+
+    try {
+      // Delete all Firestore data first (needs an authenticated session).
+      await storage.deleteAccount({
+        id: currentUser.uid,
+        name: currentUser.displayName || 'User',
+        email: currentUser.email || '',
+        type: 'user',
+        createdAt: Date.now()
+      });
+      // Then delete the auth user itself.
+      await deleteUser(currentUser);
+      localStorage.removeItem(GUEST_STORAGE_KEY);
+      continueAsGuest();
+    } catch (error: any) {
+      if (import.meta.env.DEV) {
+        console.error('Account deletion failed:', error);
+      }
+      if (error.code === 'auth/requires-recent-login') {
+        throw new Error('Please sign out and sign in again before deleting your account.');
+      }
+      throw new Error('Failed to delete account. Please try again.');
+    }
+  };
+
   return (
-    <AuthContext.Provider value={{ user, isLoading, signInWithGoogle, logout, continueAsGuest }}>
+    <AuthContext.Provider value={{ user, isLoading, signInWithGoogle, logout, continueAsGuest, deleteAccount }}>
       {children}
     </AuthContext.Provider>
   );

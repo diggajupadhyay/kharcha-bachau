@@ -11,6 +11,7 @@ import { calculateMemberBalances } from '../utils/balances';
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 const ACTIVE_WALLET_KEY = 'kharcha_bachau_active_wallet_id';
+const WALLETS_CACHE_KEY = 'kharcha_bachau_wallets_cache';
 const CUSTOM_CATEGORIES_KEY = 'kharcha_bachau_custom_categories';
 const READ_NOTIFICATIONS_KEY = 'kharcha_bachau_read_notifications';
 const DISMISSED_NOTIFICATIONS_KEY = 'kharcha_bachau_dismissed_notifications';
@@ -59,11 +60,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     localStorage.setItem(DISMISSED_NOTIFICATIONS_KEY, JSON.stringify([...ids]));
   }, []);
   
-  // Clean up old country key from localStorage
-  useEffect(() => {
-    localStorage.removeItem('kharcha_bachau_country');
-  }, []);
-  
   // Wallet State
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [activeWallet, setActiveWallet] = useState<Wallet | null>(null);
@@ -81,6 +77,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [activeWallet]);
 
+  // Persist full wallet list to localStorage for offline fallback
+  useEffect(() => {
+    localStorage.setItem(WALLETS_CACHE_KEY, JSON.stringify(wallets));
+  }, [wallets]);
+
   // Data State
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budget, setBudgetState] = useState(20000);
@@ -89,9 +90,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   
   // Derived Stats
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats>({
-      currentMonthSpending: 0,
-      lastMonthSpending: 0,
-      percentChange: 0
+      currentMonthSpending: 0
   });
 
   useEffect(() => {
@@ -158,14 +157,26 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                       const personalWallet = userWallets.find(w => w.isPersonal);
                       setActiveWallet(personalWallet || userWallets[0]);
                   }
-              } else {
-                  // Only create default personal wallet if user has no wallets at all
-                  // This should rarely happen since syncGuestData creates one if guest data exists
+} else {
+                  // Offline fallback: try localStorage cache before creating a new wallet
+                  const cached = localStorage.getItem(WALLETS_CACHE_KEY);
+                  if (cached) {
+                    try {
+                      const parsed: Wallet[] = JSON.parse(cached);
+                      if (parsed.length > 0) {
+                        setWallets(parsed);
+                        const saved = savedWalletId ? parsed.find(w => w.id === savedWalletId) : null;
+                        setActiveWallet(saved || parsed[0]);
+                        return;
+                      }
+                    } catch { /* ignore corrupt cache */ }
+                  }
+                  // Only create default personal wallet if no wallets exist anywhere
                   await storage.createWallet(user, 'Personal Wallet', true);
                   const updatedWallets = await storage.getUserWallets(user);
                   setWallets(updatedWallets);
                   setActiveWallet(updatedWallets[0]);
-              }
+                }
           }
       };
       loadWallets();
@@ -221,34 +232,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       const monthStartStr = isoMonthStart(y, m);
       const monthEndStr = isoMonthEnd(y, m);
-      const lm = m === 0 ? 11 : m - 1;
-      const ly = m === 0 ? y - 1 : y;
-      const lmStartStr = isoMonthStart(ly, lm);
-      const lmEndStr = isoMonthEnd(ly, lm);
 
       let currentMonthExpense = 0;
-      let lastMonthExpense = 0;
 
       // Compare date-only strings (YYYY-MM-DD) lexicographically — TZ-safe
       expenses.forEach(e => {
           if (e.date >= monthStartStr && e.date <= monthEndStr) {
               currentMonthExpense += e.amount;
-          } else if (e.date >= lmStartStr && e.date <= lmEndStr) {
-              lastMonthExpense += e.amount;
           }
       });
-      
-      let percentChange = 0;
-      if (lastMonthExpense > 0) {
-          percentChange = ((currentMonthExpense - lastMonthExpense) / lastMonthExpense) * 100;
-      } else if (currentMonthExpense > 0) {
-          percentChange = 100; 
-      }
 
       setMonthlyStats({
           currentMonthSpending: Math.round(currentMonthExpense * 100) / 100,
-          lastMonthSpending: Math.round(lastMonthExpense * 100) / 100,
-          percentChange
       });
 
     }, [expenses]);
@@ -402,7 +397,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
   }, [user, createNewWallet, showNotification]);
 
-  const addExpense = useCallback(async (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => {
+  const addExpense = useCallback(async (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => {
     if (!user || !activeWallet) return;
     try {
         const dateStr = date ? format(date, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
@@ -414,8 +409,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             note,
             date: dateStr,
             splitDetails,
-            tags: tags && tags.length > 0 ? tags.map(t => t.trim().toLowerCase()).filter(t => t.length > 0 && t.length <= 20) : undefined,
-            transportDetails
         });
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
         showNotification('success', 'Expense added');
@@ -429,16 +422,24 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [user, activeWallet, showNotification, triggerHaptic]);
 
-  const updateExpense = useCallback(async (id: string, amount: number, note: string, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => {
+  const updateExpense = useCallback(async (id: string, amount: number, note: string) => {
     if (!user || !activeWallet) return;
     try {
         const updates: Partial<Expense> = { amount, note };
-        if (tags !== undefined) {
-            updates.tags = tags.length > 0 ? tags.map(t => t.trim().toLowerCase()).filter(t => t.length > 0 && t.length <= 20) : undefined;
+
+        const originalExpense = expenses.find(e => e.id === id);
+        if (originalExpense?.splitDetails) {
+            const updatedSplitDetails = { ...originalExpense.splitDetails };
+            if (updatedSplitDetails.splitType === 'equal') {
+                const perPerson = amount / updatedSplitDetails.participants.length;
+                updatedSplitDetails.participants = updatedSplitDetails.participants.map(p => ({
+                    ...p,
+                    amount: Math.round(perPerson * 100) / 100
+                }));
+            }
+            updates.splitDetails = updatedSplitDetails;
         }
-        if (transportDetails !== undefined) {
-            updates.transportDetails = transportDetails;
-        }
+
         await storage.updateExpense(user, activeWallet.id, id, updates);
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
         showNotification('success', 'Updated successfully');
@@ -450,7 +451,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             console.error('Error updating expense:', e);
         }
     }
-  }, [user, activeWallet, showNotification, triggerHaptic]);
+  }, [user, activeWallet, expenses, showNotification, triggerHaptic]);
 
   const deleteExpense = useCallback(async (id: string) => {
       if (!user || !activeWallet) return;

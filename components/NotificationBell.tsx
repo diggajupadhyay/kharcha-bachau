@@ -28,4 +28,4 @@ const NotificationBell: React.FC<NotificationBellProps> = ({ className = '' }) =
   );
 };
 
-export default NotificationBell;
+export default React.memo(NotificationBell);

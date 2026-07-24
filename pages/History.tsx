@@ -1,16 +1,29 @@
 import React, { useMemo, useState, useEffect, useCallback } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
-import { Trash2, Search, X, Users, Tag, Filter } from 'lucide-react';
+import { Trash2, Search, X, Users } from 'lucide-react';
 import { format, subDays, startOfYear } from 'date-fns';
 import AuthModal from '../components/AuthModal';
 import EditExpenseModal from '../components/EditExpenseModal';
 import BalanceSummary from '../components/BalanceSummary';
-import FilterModal, { FilterState } from '../components/FilterModal';
 import NotificationBell from '../components/NotificationBell';
 import { TransactionListSkeleton } from '../components/Skeleton';
 import { Expense } from '../types';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
+
+export interface FilterState {
+  dateRange: {
+    type: 'preset' | 'custom';
+    preset?: 'today' | 'yesterday' | 'thisMonth' | 'lastMonth' | 'last7days' | 'last30days' | 'thisYear' | 'all';
+    customStart?: string;
+    customEnd?: string;
+  };
+  categories: string[];
+  amountRange: {
+    min?: number;
+    max?: number;
+  };
+}
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const monthStart = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-01`;
@@ -30,33 +43,19 @@ const History: React.FC = () => {
   // Filter state — single source of truth (advancedFilters drives everything)
   const [searchTerm, setSearchTerm] = useState('');
   const [showSearch, setShowSearch] = useState(false);
-  const [showFilterModal, setShowFilterModal] = useState(false);
   const [advancedFilters, setAdvancedFilters] = useState<FilterState>({
     dateRange: { type: 'preset', preset: 'thisMonth' },
     categories: [],
-    tags: [],
     amountRange: {}
   });
   
-  // Get all available tags from expenses
-  const availableTags = useMemo(() => {
-    const allTags = new Set<string>();
-    expenses.forEach(expense => {
-      if (expense.tags) {
-        expense.tags.forEach(tag => allTags.add(tag));
-      }
-    });
-    return Array.from(allTags).sort();
-  }, [expenses]);
-
   // Whether any filter deviates from the default (this month, no category/tag/amount filters)
   const isFilterActive = useMemo(() => {
-    const { dateRange, categories, tags, amountRange } = advancedFilters;
+    const { dateRange, categories, amountRange } = advancedFilters;
     const dateActive = dateRange.type === 'custom' || (dateRange.type === 'preset' && dateRange.preset !== 'thisMonth');
     const categoryActive = categories.length > 0;
-    const tagActive = tags.length > 0;
     const amountActive = amountRange.min !== undefined || amountRange.max !== undefined;
-    return dateActive || categoryActive || tagActive || amountActive;
+    return dateActive || categoryActive || amountActive;
   }, [advancedFilters]);
   
   // Recalculate currentDate at midnight
@@ -113,13 +112,6 @@ const History: React.FC = () => {
       filtered = filtered.filter(e => advancedFilters.categories.includes(e.categoryId));
     }
     
-    // Tag Filter
-    if (advancedFilters.tags.length > 0) {
-      filtered = filtered.filter(e => 
-        e.tags && e.tags.some(tag => advancedFilters.tags.includes(tag))
-      );
-    }
-    
     // Amount Range Filter
     if (advancedFilters.amountRange.min !== undefined) {
       filtered = filtered.filter(e => e.amount >= advancedFilters.amountRange.min!);
@@ -134,8 +126,7 @@ const History: React.FC = () => {
       filtered = filtered.filter(e => 
         e.note?.toLowerCase().includes(lower) || 
         e.categoryName.toLowerCase().includes(lower) ||
-        e.amount.toString().includes(lower) ||
-        e.tags?.some(tag => tag.toLowerCase().includes(lower))
+        e.amount.toString().includes(lower)
       );
     }
 
@@ -149,9 +140,23 @@ const History: React.FC = () => {
     });
   }, [expenses, searchTerm, advancedFilters, currentDate]);
 
+  const PAGE_SIZE = 50;
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
+
+  // Reset the visible window whenever the filtered result set changes
+  useEffect(() => {
+    setVisibleCount(PAGE_SIZE);
+  }, [searchTerm, advancedFilters]);
+
+  const visibleExpenses = useMemo(
+    () => filteredExpenses.slice(0, visibleCount),
+    [filteredExpenses, visibleCount]
+  );
+  const hasMore = filteredExpenses.length > visibleExpenses.length;
+
   const grouped = useMemo(() => {
-      const groups: Record<string, typeof filteredExpenses> = {};
-      filteredExpenses.forEach(t => {
+      const groups: Record<string, typeof visibleExpenses> = {};
+      visibleExpenses.forEach(t => {
           if (!groups[t.date]) groups[t.date] = [];
           groups[t.date].push(t);
       });
@@ -161,12 +166,12 @@ const History: React.FC = () => {
       });
       // Sort date groups by date (newest dates first)
       const sortedDates = [...Object.keys(groups)].sort((a, b) => b.localeCompare(a));
-      const sortedGroups: Record<string, typeof filteredExpenses> = {};
+      const sortedGroups: Record<string, typeof visibleExpenses> = {};
       sortedDates.forEach(date => {
         sortedGroups[date] = groups[date];
       });
       return sortedGroups;
-  }, [filteredExpenses]);
+  }, [visibleExpenses]);
 
   // Calculate Summary for the filtered view
   const summary = useMemo(() => {
@@ -236,7 +241,7 @@ const History: React.FC = () => {
         paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0px))',
         paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0px))',
         paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
-        paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))'
+        paddingBottom: 'calc(9rem + env(safe-area-inset-bottom, 0px))'
       }}
     >
       <div className="pt-3 px-3 md:px-5 lg:px-6">
@@ -277,40 +282,14 @@ const History: React.FC = () => {
        </div>
 
         {/* Filters Row — consistent 44px+ tap/click targets */}
-       <div className="mb-4 flex items-center gap-2 flex-wrap">
-           <button
-               onClick={() => setShowSearch(!showSearch)}
-                className="min-w-[44px] min-h-[44px] bg-white border border-slate-200 rounded-xl flex items-center justify-center active:scale-95 hover:shadow-md hover:bg-slate-100 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-               aria-label="Search"
-           >
-               <Search size={20} className="text-slate-600" />
-           </button>
-           
-           <button
-               onClick={() => setShowFilterModal(true)}
-                className={`min-w-[44px] min-h-[44px] border rounded-xl flex items-center justify-center active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                  isFilterActive
-                    ? 'bg-emerald-600 border-emerald-600 text-white hover:bg-emerald-700'
-                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-100'
-                }`}
-               aria-label="Filters"
-           >
-               <Filter size={20} />
-           </button>
-           
-            {availableTags.length > 0 && (
-              <button
-                  onClick={() => { if (advancedFilters.tags.length > 0) setAdvancedFilters(prev => ({ ...prev, tags: [] })); }}
-                  className={`h-11 px-3 rounded-xl text-sm font-medium active:scale-95 flex items-center gap-1.5 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                      advancedFilters.tags.length > 0
-                          ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
-                          : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-100'
-                  }`}
-              >
-                  <Tag size={16} />
-                  {advancedFilters.tags.length > 0 ? `${advancedFilters.tags.length}` : 'Tags'}
-              </button>
-            )}
+<div className="mb-4 flex items-center gap-2 flex-wrap">
+            <button
+                onClick={() => setShowSearch(!showSearch)}
+                 className="min-w-[44px] min-h-[44px] bg-white border border-slate-200 rounded-xl flex items-center justify-center active:scale-95 hover:shadow-md hover:bg-slate-100 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                aria-label="Search"
+            >
+                <Search size={20} className="text-slate-600" />
+            </button>
             
             <div className="flex gap-1.5 flex-1 flex-wrap">
                 <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'today' } }))}
@@ -338,7 +317,7 @@ const History: React.FC = () => {
                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
                <input 
                    type="text" 
-                   placeholder="Search..." 
+                   placeholder="Search expenses" 
                    value={searchTerm}
                    onChange={e => setSearchTerm(e.target.value)}
                    className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
@@ -352,45 +331,6 @@ const History: React.FC = () => {
                </button>
            </div>
        )}
-       
-        {/* Tag Filter - Show available tags */}
-        {availableTags.length > 0 && (
-            <div className="mb-3">
-                <div className="flex flex-wrap gap-2">
-                    {availableTags.map(tag => {
-                        const isSelected = advancedFilters.tags.includes(tag);
-                        return (
-                            <button
-                                key={tag}
-                                onClick={() => {
-                                    if (isSelected) {
-                                        setAdvancedFilters(prev => ({ ...prev, tags: prev.tags.filter(t => t !== tag) }));
-                                    } else {
-                                        setAdvancedFilters(prev => ({ ...prev, tags: [...prev.tags, tag] }));
-                                    }
-                                }}
-                                className={`px-2.5 py-1 rounded-lg text-xs font-medium active:scale-95 flex items-center gap-1 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                                    isSelected
-                                        ? 'bg-emerald-600 text-white hover:bg-emerald-700' 
-                                        : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
-                                }`}
-                            >
-                                <Tag size={12} />
-                                {tag}
-                            </button>
-                        );
-                    })}
-                    {advancedFilters.tags.length > 0 && (
-                        <button
-                            onClick={() => setAdvancedFilters(prev => ({ ...prev, tags: [] }))}
-                            className="px-2.5 py-1 rounded-lg text-xs font-medium text-slate-500 bg-white border border-slate-200 active:scale-95 hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
-                        >
-                            All Tags
-                        </button>
-                    )}
-                </div>
-            </div>
-        )}
        
         {/* Group wallet settlement summary */}
         {activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1 && (
@@ -444,34 +384,9 @@ const History: React.FC = () => {
                                                  {currencySymbol} {item.amount.toLocaleString()}
                                             </span>
                                         </div>
-                                        {item.note && (
-                                            <p className="text-xs text-slate-500 truncate">{item.note}</p>
-                                        )}
-                                   {/* Transport Details */}
-                                   {item.transportDetails && (
-                                       <div className="text-[10px] text-blue-600 mt-1 space-y-0.5">
-                                           <p className="font-medium">
-                                               {item.transportDetails.from} → {item.transportDetails.to}
-                                           </p>
-                                           <p className="text-slate-500">
-                                               {item.transportDetails.passengers} Passengers
-                                           </p>
-                                       </div>
-                                   )}
-                                   {/* Tags */}
-                                   {item.tags && item.tags.length > 0 && (
-                                       <div className="flex flex-wrap gap-1 mt-1">
-                                           {item.tags.map(tag => (
-                                               <span
-                                                   key={tag}
-                                                   className="inline-flex items-center gap-0.5 px-1.5 py-0.5 bg-emerald-50 border border-emerald-200 rounded text-[10px] font-medium text-emerald-700"
-                                               >
-                                                   <Tag size={8} />
-                                                   {tag}
-                                               </span>
-                                           ))}
-                                       </div>
-                                   )}
+{item.note && (
+                                        <p className="text-xs text-slate-500 truncate">{item.note}</p>
+                                    )}
                                    {item.splitDetails && (
                                        <p className="text-[10px] text-slate-400 mt-0.5">
                                          Paid by {item.splitDetails.participants.find(p => p.userId === item.splitDetails?.paidBy)?.userName || 'Unknown'} • 
@@ -496,6 +411,14 @@ const History: React.FC = () => {
                </div>
                );
            })}
+           {hasMore && (
+             <button
+               onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
+               className="w-full mt-2 py-3 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 active:scale-95 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+             >
+               Show more ({filteredExpenses.length - visibleExpenses.length} more)
+             </button>
+           )}
          </div>
         ) : (
           <div className="text-center py-12 flex flex-col items-center">
@@ -519,7 +442,7 @@ const History: React.FC = () => {
          {/* Undo snackbar */}
         {pendingDelete && (
           <div
-            className="fixed left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white rounded-xl shadow-2xl flex items-center gap-3 px-4 py-3 animate-fade-in"
+            className="fixed left-1/2 -translate-x-1/2 z-50 bg-slate-900 text-white rounded-xl shadow-2xl flex items-center gap-3 px-4 py-3 animate-slide-up-bottom"
             style={{ bottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))', maxWidth: 'calc(100% - 2rem)' }}
             role="status"
           >
@@ -534,19 +457,11 @@ const History: React.FC = () => {
         )}
 
 
-       <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
-       <EditExpenseModal 
-         expense={editingExpense}
-         isOpen={!!editingExpense}
-         onClose={() => setEditingExpense(null)}
-       />
-        <FilterModal
-          isOpen={showFilterModal}
-          onClose={() => setShowFilterModal(false)}
-          onApply={(filters) => setAdvancedFilters(filters)}
-          expenses={expenses}
-          availableTags={availableTags}
-          currentFilters={advancedFilters}
+<AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
+        <EditExpenseModal 
+          expense={editingExpense}
+          isOpen={!!editingExpense}
+          onClose={() => setEditingExpense(null)}
         />
       </div>
     </div>

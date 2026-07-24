@@ -7,7 +7,7 @@ export const generateCSVExport = (expenses: Expense[]): void => {
     }
 
     // CSV Headers
-    const headers = ['Date', 'Category', 'Amount (Rs.)', 'Note', 'Tags', 'Added By', 'Created At'];
+    const headers = ['Date', 'Category', 'Amount (Rs.)', 'Note', 'Added By', 'Created At'];
     
     // Convert expenses to CSV rows
     const rows = expenses.map(expense => {
@@ -15,7 +15,6 @@ export const generateCSVExport = (expenses: Expense[]): void => {
         const category = `${expense.categoryEmoji} ${expense.categoryName}`;
         const amount = expense.amount.toFixed(2);
         const note = (expense.note || '').replace(/"/g, '""'); // Escape quotes in CSV
-        const tags = (expense.tags || []).join('; ').replace(/"/g, '""'); // Join tags with semicolon
         const addedBy = expense.createdBy?.name || 'Guest';
         const createdAt = format(new Date(expense.createdAt), 'yyyy-MM-dd HH:mm:ss');
         
@@ -25,7 +24,6 @@ export const generateCSVExport = (expenses: Expense[]): void => {
             category,
             amount,
             `"${note}"`,
-            `"${tags}"`,
             addedBy,
             createdAt
         ].join(',');

@@ -27,7 +27,7 @@ const OfflineBanner: React.FC = () => {
   return (
     <div
       role="status"
-      className="fixed top-0 left-0 right-0 z-[120] bg-amber-500 text-white text-xs font-medium px-4 py-2 flex items-center justify-center gap-2"
+      className="fixed top-0 left-0 right-0 z-50 bg-amber-500 text-white text-xs font-medium px-4 py-2 flex items-center justify-center gap-2"
       style={{ paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))' }}
     >
       <WifiOff size={14} className="flex-shrink-0" />

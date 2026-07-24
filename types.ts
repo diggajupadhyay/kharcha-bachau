@@ -46,12 +46,6 @@ export interface Expense {
     name: string;
   };
   createdAt: number;
-  tags?: string[]; // Array of tag strings for expense organization
-  transportDetails?: {
-    passengers: number; // Number of people on board
-    from: string; // Origin location
-    to: string; // Destination location
-  };
   splitDetails?: {
     splitType: 'equal' | 'percentage' | 'custom';
     participants: Array<{
@@ -90,12 +84,11 @@ export interface AuthContextType {
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   continueAsGuest: () => void;
+  deleteAccount: () => Promise<void>;
 }
 
 export interface MonthlyStats {
   currentMonthSpending: number;
-  lastMonthSpending: number;
-  percentChange: number;
 }
 
 export interface StoreContextType {
@@ -114,8 +107,8 @@ export interface StoreContextType {
   monthlyStats: MonthlyStats;
   isSyncing: boolean;
   
-  addExpense: (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => Promise<void>;
-  updateExpense: (id: string, amount: number, note: string, tags?: string[], transportDetails?: { passengers: number; from: string; to: string }) => Promise<void>;
+  addExpense: (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => Promise<void>;
+  updateExpense: (id: string, amount: number, note: string) => Promise<void>;
   deleteExpense: (id: string) => Promise<void>;
   restoreExpense: (expense: Expense) => Promise<void>;
   setExpenses: (expenses: Expense[]) => void;

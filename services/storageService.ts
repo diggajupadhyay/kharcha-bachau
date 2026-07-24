@@ -425,14 +425,6 @@ const buildExpenseDocument = (
     doc.splitDetails = expense.splitDetails;
   }
   
-  if (expense.tags && expense.tags.length > 0) {
-    doc.tags = expense.tags;
-  }
-  
-  if (expense.transportDetails) {
-    doc.transportDetails = expense.transportDetails;
-  }
-  
   return doc as unknown as Expense;
 };
 
@@ -505,16 +497,6 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
     if (updates.amount !== undefined) allowedUpdates.amount = updates.amount;
     if (updates.note !== undefined) allowedUpdates.note = updates.note;
     if (updates.splitDetails !== undefined) allowedUpdates.splitDetails = updates.splitDetails;
-    if (updates.tags !== undefined) {
-        const normalizedTags = updates.tags
-            .map(t => t.trim().toLowerCase())
-            .filter(t => t.length > 0 && t.length <= 20)
-            .slice(0, 5);
-        allowedUpdates.tags = normalizedTags.length > 0 ? normalizedTags : [];
-    }
-    if (updates.transportDetails !== undefined) {
-        allowedUpdates.transportDetails = updates.transportDetails;
-    }
 
     if (user.type === 'guest') {
         const current = getLocalData();
@@ -705,33 +687,54 @@ export const subscribeToWalletExpenses = (
 ) => {
     const expensesRef = collection(db, 'wallets', walletId, 'expenses');
     const q = query(expensesRef, orderBy('date', 'desc'));
-    
-    return onSnapshot(
-      q,
-      snapshot => {
-        const expenses = snapshot.docs.map(doc => doc.data() as Expense);
-        
-        if (import.meta.env.DEV) {
-            console.log('Expenses updated from Firestore:', expenses.length);
-        }
-        
-        callback(expenses);
-      },
-      (error) => {
-        if (import.meta.env.DEV) {
-            console.error("Firestore subscription error:", (error as any)?.code, (error as any)?.message);
-        }
-        
-        if ((error as any)?.code === 'failed-precondition' && import.meta.env.DEV) {
-            console.error('Firestore index required. Please deploy indexes: npm run deploy:indexes');
-        }
-        
-        // IMPORTANT: Never blank the list on a transient error (offline, permission
-        // blip, missing index). Keep the last known data and surface the error so the
-        // UI doesn't silently lose the user's expenses.
-        onError?.(error);
-      }
-    );
+
+    const MAX_RETRIES = 5;
+    const RETRY_BASE_DELAY = 1000;
+    let retries = 0;
+    let unsubscribe: () => void;
+    let retryTimer: ReturnType<typeof setTimeout>;
+
+    const subscribe = () => {
+        unsubscribe = onSnapshot(
+            q,
+            snapshot => {
+                retries = 0;
+                const expenses = snapshot.docs.map(doc => doc.data() as Expense);
+                callback(expenses);
+            },
+            (error) => {
+                const code = (error as any)?.code;
+                // Non-retryable: permission denied, missing index — surface immediately
+                if (code === 'permission-denied' || code === 'failed-precondition') {
+                    onError?.(error);
+                    return;
+                }
+                // Retryable: network blips, unavailable, internal errors
+                if (retries < MAX_RETRIES) {
+                    retries++;
+                    const delay = RETRY_BASE_DELAY * Math.pow(2, retries - 1);
+                    if (import.meta.env.DEV) {
+                        console.warn(
+                            `Firestore listener error (${code}), retrying in ${delay}ms (attempt ${retries}/${MAX_RETRIES})`
+                        );
+                    }
+                    retryTimer = setTimeout(subscribe, delay);
+                } else {
+                    if (import.meta.env.DEV) {
+                        console.error('Firestore listener exhausted retries, giving up.');
+                    }
+                    onError?.(error);
+                }
+            }
+        );
+    };
+
+    subscribe();
+
+    return () => {
+        clearTimeout(retryTimer);
+        unsubscribe?.();
+    };
 };
 
 export const getGuestExpenses = (): Expense[] => {
@@ -818,6 +821,58 @@ export const bulkImportExpenses = async (user: User, expenses: Expense[]): Promi
   }
 
   return { imported, skipped };
+};
+
+// Delete a user's entire account and all associated data.
+// - Deletes every wallet the user owns or is a member of (and their expenses)
+// - Deletes the user's own user document
+// Caller is responsible for signing the user out afterwards.
+export const deleteAccount = async (user: User): Promise<void> => {
+  if (user.type === 'guest') {
+    // Guests only store data locally — clear it and return.
+    try {
+      localStorage.removeItem(GUEST_DATA_KEY);
+      localStorage.removeItem(GUEST_CATEGORIES_KEY);
+      localStorage.removeItem('kharcha_bachau_guest_v1');
+      localStorage.removeItem('kharcha_bachau_active_wallet_id');
+    } catch {
+      // ignore
+    }
+    return;
+  }
+
+  try {
+    const wallets = await getUserWallets(user);
+
+    for (const wallet of wallets) {
+      try {
+        await deleteWallet(user, wallet.id);
+      } catch (error: any) {
+        if (import.meta.env.DEV) {
+          console.error(`Failed to delete wallet ${wallet.id} during account deletion:`, error);
+        }
+        // Continue deleting other wallets even if one fails.
+      }
+    }
+
+    // Delete the user's own document last.
+    try {
+      await deleteDoc(doc(db, 'users', user.id));
+    } catch (error: any) {
+      if (import.meta.env.DEV) {
+        console.error('Failed to delete user document:', error);
+      }
+    }
+
+    if (import.meta.env.DEV) {
+      console.log('Account data deletion completed for user:', user.id);
+    }
+  } catch (error: any) {
+    if (import.meta.env.DEV) {
+      console.error('Error during account deletion:', error);
+    }
+    throw new Error('Failed to delete account. Please try again.');
+  }
 };
 
 export const getStoredBudget = async (user: User | null, walletId: string | undefined): Promise<number> => {

@@ -8,12 +8,12 @@ const ToastContainer: React.FC = () => {
   if (notifications.length === 0) return null;
 
   return (
-    <div className="fixed top-4 md:top-6 lg:top-8 left-0 right-0 z-[150] flex flex-col items-center gap-3 px-4 md:px-6 lg:px-8 pointer-events-none">
+    <div className="fixed top-4 md:top-6 lg:top-8 left-0 right-0 z-notification flex flex-col items-center gap-3 px-4 md:px-6 lg:px-8 pointer-events-none">
       {notifications.map((note) => (
         <div 
             key={note.id}
             className={`
-                pointer-events-auto flex items-center gap-3 md:gap-4 px-4 md:px-6 lg:px-8 py-3 md:py-4 rounded-2xl border-2 max-w-sm md:max-w-md lg:max-w-lg w-full shadow-lg
+                pointer-events-auto flex items-center gap-3 md:gap-4 px-4 md:px-6 lg:px-8 py-3 md:py-4 rounded-xl border max-w-sm md:max-w-md lg:max-w-lg w-full shadow-lg
                 ${note.type === 'success' ? 'bg-white border-emerald-200 text-slate-900' : ''}
                 ${note.type === 'error' ? 'bg-white border-rose-200 text-slate-900' : ''}
                 ${note.type === 'info' ? 'bg-white border-blue-200 text-slate-900' : ''}

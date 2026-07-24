@@ -11,7 +11,7 @@ interface QuickAddModalProps {
 }
 
 const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
-  const { getAllCategories, triggerHaptic } = useStore();
+  const { getAllCategories } = useStore();
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
 
   const sortedCategories = useMemo(() => {
@@ -42,7 +42,6 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
   };
 
   const handleCategorySelect = (cat: Category) => {
-    triggerHaptic();
     setSelectedCategory(cat);
   };
 

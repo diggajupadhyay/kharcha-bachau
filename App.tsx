@@ -1,15 +1,16 @@
-import React, { useState, Suspense, useMemo } from 'react';
+import React, { useState, Suspense, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { LayoutGrid, Clock, Settings as SettingsIcon, Plus, Loader2 } from 'lucide-react';
+import { useCurrentDate } from './hooks/useCurrentDate';
 
 const Tracker = React.lazy(() => import('./pages/Tracker'));
 const History = React.lazy(() => import('./pages/History'));
 const SettingsPage = React.lazy(() => import('./pages/SettingsPage'));
+const Privacy = React.lazy(() => import('./pages/Privacy'));
 const NotificationCenter = React.lazy(() => import('./components/NotificationCenter'));
 import { StoreProvider, useStore } from './context/StoreContext';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { NotificationUIProvider, useNotificationUI } from './context/NotificationUIContext';
-import { todayISO } from './utils/date';
 import ToastContainer from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import InstallPrompt from './components/InstallPrompt';
@@ -21,12 +22,13 @@ const AppContent: React.FC = () => {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const { isOpen: showNotificationCenter, close: closeNotifications } = useNotificationUI();
 
-  const currentDate = useMemo(() => todayISO(), []);
+  const currentDate = useCurrentDate();
+  const handleCloseQuickAdd = useCallback(() => setShowQuickAdd(false), []);
+  const handleOpenQuickAdd = useCallback(() => setShowQuickAdd(true), []);
 
   if (isLoading) return <div className="h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-emerald-600" /></div>;
 
   return (
-    <BrowserRouter>
       <div className="font-sans text-slate-900 bg-slate-100 min-h-screen flex justify-center overflow-x-hidden">
         <div className="w-full max-w-lg sm:max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl bg-white h-[100dvh] md:h-auto md:min-h-screen relative shadow-2xl flex flex-col overflow-hidden mx-auto">
 
@@ -44,6 +46,7 @@ const AppContent: React.FC = () => {
                 <Route path="/" element={<Tracker currentDate={currentDate} />} />
                 <Route path="/history" element={<History />} />
                 <Route path="/settings" element={<SettingsPage />} />
+                <Route path="/privacy" element={<Privacy />} />
               </Routes>
             </Suspense>
           </main>
@@ -51,8 +54,8 @@ const AppContent: React.FC = () => {
           {/* Fixed bottom area: FAB + Nav — centered with container */}
           <div className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-lg sm:max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl z-40 pointer-events-none">
             <button
-              onClick={() => setShowQuickAdd(true)}
-              className="absolute bottom-24 flex items-center justify-center w-14 h-14 rounded-full bg-emerald-600 text-white shadow-xl active:scale-95 hover:bg-emerald-700 hover:shadow-2xl hover:scale-105 transition-all pointer-events-auto"
+              onClick={handleOpenQuickAdd}
+              className="absolute bottom-20 flex items-center justify-center w-14 h-14 rounded-full bg-emerald-600 text-white shadow-xl active:scale-95 hover:bg-emerald-700 hover:shadow-2xl hover:scale-105 transition-all pointer-events-auto"
               style={{ right: 'max(1.25rem, env(safe-area-inset-right, 0px))' }}
               aria-label="Add expense"
             >
@@ -90,23 +93,24 @@ const AppContent: React.FC = () => {
             />
           </Suspense>
 
-          <QuickAddModal isOpen={showQuickAdd} onClose={() => setShowQuickAdd(false)} />
+          <QuickAddModal isOpen={showQuickAdd} onClose={handleCloseQuickAdd} />
         </div>
       </div>
-    </BrowserRouter>
   );
 };
 
 const App: React.FC = () => (
-  <ErrorBoundary>
-    <AuthProvider>
-      <StoreProvider>
-        <NotificationUIProvider>
-          <AppContent />
-        </NotificationUIProvider>
-      </StoreProvider>
-    </AuthProvider>
-  </ErrorBoundary>
+  <BrowserRouter>
+    <ErrorBoundary>
+      <AuthProvider>
+        <StoreProvider>
+          <NotificationUIProvider>
+            <AppContent />
+          </NotificationUIProvider>
+        </StoreProvider>
+      </AuthProvider>
+    </ErrorBoundary>
+  </BrowserRouter>
 );
 
 export default App;

@@ -1,8 +1,13 @@
 {
+  "id": "/",
   "name": "Kharcha Bachau",
   "short_name": "Kharcha Bachau",
   "description": "Smart daily expense tracker for Nepal.",
   "start_url": "./",
+  "scope": "./",
+  "lang": "en",
+  "dir": "ltr",
+  "categories": ["finance", "productivity"],
   "display": "standalone",
   "background_color": "#f8fafc",
   "theme_color": "#10b981",

@@ -15,7 +15,7 @@ interface TrackerProps {
 }
 
 const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
-  const { triggerHaptic, expenses, monthlyStats, activeWallet, budget, getAllCategories, isSyncing } = useStore();
+  const { expenses, monthlyStats, activeWallet, budget, getAllCategories, isSyncing } = useStore();
   const { user } = useAuth();
   const currencySymbol = getCurrencySymbol();
 
@@ -50,17 +50,11 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
         paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0px))',
         paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0px))',
         paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
-        paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))'
+        paddingBottom: 'calc(9rem + env(safe-area-inset-bottom, 0px))'
       }}
     >
 
       <div className="pt-3 px-3 md:px-5 lg:px-6 relative z-10 max-w-full">
-        {user?.type === 'guest' && (
-          <div className="mb-4 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 flex items-start gap-2">
-            <span className="font-semibold shrink-0">Guest mode:</span>
-            <span>Your expenses are saved only on this device/browser and will be lost if you clear data or switch devices. Sign in to back them up to the cloud and sync everywhere.</span>
-          </div>
-        )}
         {/* Header */}
         <div className="flex justify-between items-center mb-5">
           <button
@@ -80,14 +74,6 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
         <div className="bg-white rounded-xl p-4 md:p-5 lg:p-6 border border-slate-200 mb-5">
           <div className="flex items-start justify-between mb-2">
             <p className="text-sm font-medium text-slate-600">Total Spent (This Month)</p>
-            {monthlyStats.lastMonthSpending > 0 && (
-              <span className={`inline-flex items-center gap-1 text-xs font-semibold ${
-                monthlyStats.percentChange > 0 ? 'text-rose-600' : 'text-emerald-600'
-              }`}>
-                {monthlyStats.percentChange > 0 ? '▲' : '▼'} {Math.abs(monthlyStats.percentChange).toFixed(0)}%
-                <span className="text-slate-400 font-normal ml-0.5">vs last month</span>
-              </span>
-            )}
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-0">
             <div className="flex-1">
@@ -159,7 +145,6 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
               <button
                 key={cat.id}
                 onClick={() => {
-                  triggerHaptic();
                   setSelectedCategory(cat);
                 }}
                 className="flex flex-col items-center gap-1.5 p-2.5 sm:p-3 bg-white rounded-xl border border-slate-200 active:scale-95 transition-all hover:shadow-md hover:border-emerald-300 select-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"

@@ -1,30 +1,27 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
-import { X, LogOut, User, Cloud, Wallet, Download, ChevronRight, Share2, FileText, Trash2, Tag, Upload, Database, Settings } from 'lucide-react';
+import { X, LogOut, User, Cloud, Wallet, Download, ChevronRight, Share2, Trash2, Tag, Upload, Database, Settings } from 'lucide-react';
 import WalletSelector from '../components/WalletSelector';
 import CategoryManager from '../components/CategoryManager';
 import AuthModal from '../components/AuthModal';
 import NotificationBell from '../components/NotificationBell';
 import ConfirmDialog from '../components/ConfirmDialog';
 import * as storage from '../services/storageService';
-const generatePDFReport = async (expenses: any, monthlyStats: any, title: string) => {
-  const { generatePDFReport: generate } = await import('../services/pdfService');
-  return generate(expenses, monthlyStats, title);
-};
 import { generateCSVExport } from '../services/csvService';
 import { exportBackup, importBackup, previewBackup, mergeBackupData } from '../services/backupService';
 
 const SettingsPage: React.FC = () => {
-  const { budget, setBudget, expenses, activeWallet, monthlyStats, leaveWallet, deleteWallet, showNotification, setExpenses, triggerHaptic, wallets, customCategories } = useStore();
-  const { user, logout, signInWithGoogle } = useAuth();
+  const navigate = useNavigate();
+  const { budget, setBudget, expenses, activeWallet, monthlyStats, leaveWallet, deleteWallet, showNotification, setExpenses, wallets, customCategories, triggerHaptic } = useStore();
+  const { user, logout, signInWithGoogle, deleteAccount } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false);
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
-  const [importMode, setImportMode] = useState<'replace' | 'merge'>('replace');
   const [backupPreview, setBackupPreview] = useState<any>(null);
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -47,23 +44,29 @@ const SettingsPage: React.FC = () => {
     }
   }, [activeWallet]);
 
+  const [localBudget, setLocalBudget] = useState(budget);
+  const budgetDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => {
+    setLocalBudget(budget);
+  }, [budget]);
+
   const handleBudgetChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const val = parseFloat(e.target.value);
-      if (!isNaN(val) && val >= 0 && val <= 1e12) setBudget(val);
+      const raw = e.target.value;
+      setLocalBudget(raw === '' ? 0 : parseFloat(raw));
+
+      if (budgetDebounceRef.current) clearTimeout(budgetDebounceRef.current);
+      budgetDebounceRef.current = setTimeout(() => {
+          const parsed = parseFloat(raw);
+          if (!isNaN(parsed) && parsed >= 0 && parsed <= 1e12) setBudget(parsed);
+      }, 600);
   };
 
-  const handlePDF = async () => {
-    if (!expenses.length) {
-      showNotification('error', 'No data to export');
-      return;
-    }
-    try {
-      await generatePDFReport(expenses, monthlyStats, 'All Time Report');
-      showNotification('success', 'PDF report generated');
-    } catch (error) {
-      showNotification('error', 'Failed to generate PDF report');
-    }
-  };
+  useEffect(() => {
+      return () => {
+          if (budgetDebounceRef.current) clearTimeout(budgetDebounceRef.current);
+      };
+  }, []);
 
   const handleCSV = () => {
     if (!expenses.length) {
@@ -82,7 +85,6 @@ const SettingsPage: React.FC = () => {
     try {
       exportBackup(expenses, wallets, budget, customCategories, user?.id);
       showNotification('success', 'Backup exported successfully');
-      triggerHaptic();
     } catch (error) {
       showNotification('error', 'Failed to export backup');
     }
@@ -105,13 +107,10 @@ const SettingsPage: React.FC = () => {
     if (!selectedImportFile) return;
     try {
       const backup = await importBackup(selectedImportFile);
-      const targetExpenses = importMode === 'replace' ? backup.data.expenses : mergeBackupData(expenses, wallets, customCategories, backup).expenses;
+      const targetExpenses = mergeBackupData(expenses, wallets, customCategories, backup).expenses;
       const result = await storage.bulkImportExpenses(user!, targetExpenses);
       if (user?.type === 'guest') {
         setExpenses(targetExpenses);
-      }
-      if (importMode === 'replace') {
-        setBudget(backup.data.budget);
       }
       showNotification('success', `Imported ${result.imported} expenses${result.skipped > 0 ? ` (${result.skipped} skipped)` : ''}`);
       setShowImportDialog(false);
@@ -165,6 +164,25 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleDeleteAccount = () => {
+    if (!user) return;
+    requestConfirm(
+      'Delete Account',
+      user.type === 'user'
+        ? 'Permanently delete your account and ALL your data (wallets, expenses, categories)? This cannot be undone.'
+        : 'Clear all locally stored data from this device? This cannot be undone.',
+      async () => {
+        try {
+          await deleteAccount();
+          showNotification('success', 'Account deleted');
+        } catch (error: any) {
+          showNotification('error', error.message || 'Failed to delete account');
+        }
+      },
+      true
+    );
+  };
+
   const isSharedWallet = activeWallet && activeWallet.id !== 'guest_wallet' && user?.type === 'user' && !activeWallet.isPersonal;
 
   return (
@@ -174,7 +192,7 @@ const SettingsPage: React.FC = () => {
         paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0px))',
         paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0px))',
         paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
-        paddingBottom: 'calc(5rem + env(safe-area-inset-bottom, 0px))'
+        paddingBottom: 'calc(9rem + env(safe-area-inset-bottom, 0px))'
       }}
     >
       <div className="pt-3 px-3 md:px-5 lg:px-6">
@@ -261,7 +279,7 @@ const SettingsPage: React.FC = () => {
                 <ChevronRight size={20} className="text-slate-400" />
               </button>
 
-              <button onClick={() => { triggerHaptic(); setIsCategoryManagerOpen(true); }} className="w-full min-h-[52px] bg-white border border-slate-200 rounded-xl px-4 flex items-center justify-between active:scale-[0.98] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+              <button onClick={() => { setIsCategoryManagerOpen(true); }} className="w-full min-h-[52px] bg-white border border-slate-200 rounded-xl px-4 flex items-center justify-between active:scale-[0.98] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                 <div className="flex items-center gap-3">
                   <Tag size={20} className="text-slate-600" />
                   <div className="text-left">
@@ -276,7 +294,7 @@ const SettingsPage: React.FC = () => {
                 <label className="text-xs font-medium text-slate-900 block mb-2">Monthly Budget Limit</label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold">{getCurrencySymbol()}</span>
-                   <input type="number" min={0} step="100" value={budget} onChange={handleBudgetChange} className="w-full bg-white border border-slate-200 rounded-xl min-h-[48px] pl-9 pr-3.5 font-bold text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                    <input type="number" min={0} step="100" value={localBudget} onChange={handleBudgetChange} className="w-full bg-white border border-slate-200 rounded-xl min-h-[48px] pl-9 pr-3.5 font-bold text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               </div>
             </div>
@@ -288,13 +306,9 @@ const SettingsPage: React.FC = () => {
             <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 space-y-3">
               <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Export / Backup</h3>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={handlePDF} className="min-h-[48px] bg-white border border-slate-200 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
-                  <FileText size={20} />
-                  <span className="text-xs">PDF</span>
-                </button>
                 <button onClick={handleCSV} className="min-h-[48px] bg-white border border-slate-200 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Download size={20} />
-                  <span className="text-xs">CSV</span>
+                  <span className="text-xs">Export CSV</span>
                 </button>
                 <button onClick={handleExportBackup} className="min-h-[48px] bg-white border border-slate-200 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Database size={20} />
@@ -322,13 +336,23 @@ const SettingsPage: React.FC = () => {
                   <span>{activeWallet?.ownerId === user?.id ? 'Delete Wallet' : 'Leave Wallet'}</span>
                 </button>
               )}
+              <button onClick={handleDeleteAccount} className="w-full min-h-[48px] bg-rose-600 border border-rose-700 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-700 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
+                <Trash2 size={20} />
+                <span>{user?.type === 'user' ? 'Delete Account' : 'Clear Local Data'}</span>
+              </button>
             </div>
           </div>
         </div>
 
         {/* Version */}
-        <div className="text-center py-6">
+        <div className="text-center py-6 space-y-2">
           <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Kharcha Bachau v0.4-beta</p>
+          <button
+            onClick={() => { navigate('/privacy'); }}
+            className="text-[11px] text-emerald-600 underline underline-offset-2 hover:text-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 rounded"
+          >
+            Privacy Policy
+          </button>
         </div>
 
         {/* Import Dialog */}
@@ -354,17 +378,7 @@ const SettingsPage: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-slate-600 mb-4">Select a backup file to import. You can replace all data or merge with existing expenses.</p>
-                  <div className="space-y-2 mb-4">
-                    <label className="flex items-center gap-3 min-h-[44px] px-3 bg-slate-50 rounded-lg cursor-pointer">
-                      <input type="radio" checked={importMode === 'replace'} onChange={() => setImportMode('replace')} className="w-4 h-4" />
-                      <span className="text-sm">Replace all data</span>
-                    </label>
-                    <label className="flex items-center gap-3 min-h-[44px] px-3 bg-slate-50 rounded-lg cursor-pointer">
-                      <input type="radio" checked={importMode === 'merge'} onChange={() => setImportMode('merge')} className="w-4 h-4" />
-                      <span className="text-sm">Merge with existing data</span>
-                    </label>
-                  </div>
+                  <p className="text-sm text-slate-600 mb-4">Select a backup file to import.</p>
                   <div className="flex gap-2">
                     <button onClick={() => { setShowImportDialog(false); setBackupPreview(null); setSelectedImportFile(null); }} className="flex-1 min-h-[44px] bg-slate-100 text-slate-700 rounded-xl font-medium active:scale-95 hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Cancel</button>
                     <label className="flex-1 min-h-[44px] bg-emerald-600 text-white rounded-xl font-medium active:scale-95 text-center flex items-center justify-center cursor-pointer hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">

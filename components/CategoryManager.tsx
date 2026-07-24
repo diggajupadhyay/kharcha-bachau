@@ -11,7 +11,7 @@ interface CategoryManagerProps {
 }
 
 const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) => {
-  const { customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories, showNotification, triggerHaptic } = useStore();
+  const { customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories, showNotification } = useStore();
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState({ name: '', emoji: '', id: '' });
@@ -46,7 +46,6 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
   };
 
   const handleDelete = async (categoryId: string) => {
-    triggerHaptic();
     await deleteCustomCategory(categoryId);
   };
 
@@ -75,7 +74,6 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
       return;
     }
 
-    triggerHaptic();
     
     if (isAdding) {
       // Generate a collision-proof custom ID (prefixed so it never clashes with default categories)
@@ -107,7 +105,7 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
   };
 
   return (
-    <div className="fixed inset-0 z-[140] flex items-end sm:items-center justify-center pointer-events-none overflow-x-hidden p-2 md:p-4 lg:p-6">
+    <div className="fixed inset-0 z-modal flex items-end sm:items-center justify-center pointer-events-none overflow-x-hidden p-2 md:p-4 lg:p-6">
       <div 
         className="absolute inset-0 bg-slate-900/60 pointer-events-auto"
         onClick={onClose}
@@ -156,14 +154,19 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
             <div className="space-y-3">
               <div>
                 <label className="text-xs font-medium text-slate-600 block mb-1.5">{'Emoji'}</label>
-                <input
-                  type="text"
-                  value={formData.emoji}
-                  onChange={(e) => setFormData(prev => ({ ...prev, emoji: e.target.value }))}
-                  placeholder="🍔"
-                  maxLength={10}
-                  className="w-full bg-white border border-slate-200 p-2.5 rounded-lg text-2xl text-center focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+                <div className="grid grid-cols-6 gap-1.5">
+                  {['🍔','🚌','🏠','💊','📚','🎮','👕','🐾','🎵','🌸','⚽','🛒'].map(emoji => (
+                    <button
+                      key={emoji}
+                      onClick={() => setFormData(prev => ({ ...prev, emoji }))}
+                      className={`w-full aspect-square rounded-lg text-xl flex items-center justify-center active:scale-95 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 ${
+                        formData.emoji === emoji ? 'bg-emerald-100 ring-2 ring-emerald-500' : 'bg-white border border-slate-200 hover:bg-slate-50'
+                      }`}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div>
                 <label className="text-xs font-medium text-slate-600 block mb-1.5">{'Category Name'}</label>

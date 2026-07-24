@@ -29,7 +29,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-slate-900/60 animate-fade-in">
+    <div className="fixed inset-0 z-auth flex items-center justify-center p-4 bg-slate-900/60 animate-fade-in">
       <div
         ref={modalRef}
         role="alertdialog"
