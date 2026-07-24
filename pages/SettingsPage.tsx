@@ -1,13 +1,12 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
-import { X, LogOut, User, Cloud, Wallet, Download, ChevronRight, Share2, Trash2, Tag, Upload, Database, Settings } from 'lucide-react';
+import { LogOut, User, Cloud, Wallet, Download, ChevronRight, Share2, Trash2, Tag, Upload, Database, Settings } from 'lucide-react';
 import WalletSelector from '../components/WalletSelector';
 import CategoryManager from '../components/CategoryManager';
 import AuthModal from '../components/AuthModal';
-import NotificationBell from '../components/NotificationBell';
 import ConfirmDialog from '../components/ConfirmDialog';
 import * as storage from '../services/storageService';
 import { generateCSVExport } from '../services/csvService';
@@ -15,7 +14,7 @@ import { exportBackup, importBackup, previewBackup, mergeBackupData } from '../s
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { budget, setBudget, expenses, activeWallet, monthlyStats, leaveWallet, deleteWallet, showNotification, setExpenses, wallets, customCategories, triggerHaptic } = useStore();
+  const { budget, setBudget, expenses, activeWallet, leaveWallet, deleteWallet, showNotification, setExpenses, wallets, customCategories, triggerHaptic } = useStore();
   const { user, logout, signInWithGoogle, deleteAccount } = useAuth();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false);
@@ -204,10 +203,9 @@ const SettingsPage: React.FC = () => {
               Settings
             </h1>
             {activeWallet && (
-              <p className="text-xs sm:text-sm text-slate-600">{activeWallet.name}</p>
+              <p className="text-xs sm:text-sm text-slate-700">{activeWallet.name}</p>
             )}
           </div>
-          <NotificationBell />
         </div>
 
         {/* Content — 2-col grid on desktop */}
@@ -216,15 +214,15 @@ const SettingsPage: React.FC = () => {
           {/* Left Column */}
           <div className="space-y-4">
             {/* Account */}
-            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 space-y-3">
+            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300 space-y-3">
               <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Account</h3>
-              <div className="bg-white p-3.5 rounded-xl flex items-center gap-3 border border-slate-200 min-h-[60px]">
+              <div className="bg-white p-3.5 rounded-xl flex items-center gap-3 border border-slate-300 min-h-[60px]">
                 <div className={`w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0 text-white ${user?.type === 'guest' ? 'bg-amber-500' : 'bg-emerald-600'}`}>
                   <User size={22} />
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-bold text-slate-900 truncate">{user?.name || 'Guest User'}</p>
-                  <p className="text-[11px] text-slate-500 truncate">{user?.type === 'guest' ? 'Data stored on device' : user?.email}</p>
+                  <p className="text-[11px] text-slate-700 truncate">{user?.type === 'guest' ? 'Data stored on device' : user?.email}</p>
                 </div>
                 {user?.type === 'user' && (
                   <button onClick={() => { logout(); }} className="min-w-[44px] min-h-[44px] text-rose-600 bg-rose-50 rounded-xl font-medium active:scale-95 flex items-center justify-center hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
@@ -233,7 +231,7 @@ const SettingsPage: React.FC = () => {
                 )}
               </div>
               {user?.type === 'guest' && (
-                <button onClick={async () => { try { await signInWithGoogle(); showNotification('success', 'Signed in with Google'); } catch (e: any) { if (e.code !== 'auth/popup-closed-by-user') showNotification('error', 'Failed to sign in'); } }} className="w-full min-h-[48px] bg-slate-900 text-white rounded-xl text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                <button onClick={async () => { try { await signInWithGoogle(); showNotification('success', 'Signed in with Google'); } catch (e: any) { if (e.code !== 'auth/popup-closed-by-user') showNotification('error', 'Failed to sign in'); } }} className="w-full min-h-[48px] bg-slate-900 text-white rounded-xl shadow-md text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Cloud size={20} />
                   <span>Back up Data to Cloud</span>
                 </button>
@@ -242,7 +240,7 @@ const SettingsPage: React.FC = () => {
 
             {/* Invite Code */}
             {inviteCode && !activeWallet?.isPersonal && (
-              <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 text-center">
+              <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300 text-center">
                 <p className="text-xs font-medium text-slate-700 mb-2">Invite Code</p>
                 <div className="flex items-center justify-center gap-3 mb-1.5">
                   <p className="text-xl font-bold text-slate-900 tracking-widest">{inviteCode}</p>
@@ -260,31 +258,31 @@ const SettingsPage: React.FC = () => {
                     <Share2 size={20} />
                   </button>
                 </div>
-                <p className="text-[11px] text-slate-500">Share this code to add members</p>
+                <p className="text-[11px] text-slate-700">Share this code to add members</p>
               </div>
             )}
 
             {/* Settings Section */}
-            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 space-y-3">
+            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300 space-y-3">
               <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Settings</h3>
               
-              <button onClick={() => setIsWalletSelectorOpen(true)} className="w-full min-h-[52px] bg-white border border-slate-200 rounded-xl px-4 flex items-center justify-between active:scale-[0.98] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+              <button onClick={() => setIsWalletSelectorOpen(true)} className="w-full min-h-[52px] bg-white border border-slate-300 rounded-xl px-4 flex items-center justify-between active:scale-[0.98] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                 <div className="flex items-center gap-3">
-                  <Wallet size={20} className="text-slate-600" />
+                  <Wallet size={20} className="text-slate-700" />
                   <div className="text-left">
                     <p className="text-sm font-medium text-slate-900">Wallet</p>
-                    <p className="text-[11px] text-slate-500">{activeWallet?.name || 'Personal'}</p>
+                    <p className="text-[11px] text-slate-700">{activeWallet?.name || 'Personal'}</p>
                   </div>
                 </div>
                 <ChevronRight size={20} className="text-slate-400" />
               </button>
 
-              <button onClick={() => { setIsCategoryManagerOpen(true); }} className="w-full min-h-[52px] bg-white border border-slate-200 rounded-xl px-4 flex items-center justify-between active:scale-[0.98] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+              <button onClick={() => { setIsCategoryManagerOpen(true); }} className="w-full min-h-[52px] bg-white border border-slate-300 rounded-xl px-4 flex items-center justify-between active:scale-[0.98] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                 <div className="flex items-center gap-3">
-                  <Tag size={20} className="text-slate-600" />
+                  <Tag size={20} className="text-slate-700" />
                   <div className="text-left">
                     <p className="text-sm font-medium text-slate-900">Manage Categories</p>
-                    <p className="text-[11px] text-slate-500">Customize categories</p>
+                    <p className="text-[11px] text-slate-700">Customize categories</p>
                   </div>
                 </div>
                 <ChevronRight size={20} className="text-slate-400" />
@@ -293,8 +291,8 @@ const SettingsPage: React.FC = () => {
               <div className="pt-1">
                 <label className="text-xs font-medium text-slate-900 block mb-2">Monthly Budget Limit</label>
                 <div className="relative">
-                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500 text-sm font-bold">{getCurrencySymbol()}</span>
-                    <input type="number" min={0} step="100" value={localBudget} onChange={handleBudgetChange} className="w-full bg-white border border-slate-200 rounded-xl min-h-[48px] pl-9 pr-3.5 font-bold text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
+                  <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-700 text-sm font-bold">{getCurrencySymbol()}</span>
+                    <input type="number" min={0} step="100" value={localBudget} onChange={handleBudgetChange} className="w-full bg-white border border-slate-300 rounded-xl min-h-[48px] pl-9 pr-3.5 font-bold text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500" />
                 </div>
               </div>
             </div>
@@ -303,27 +301,27 @@ const SettingsPage: React.FC = () => {
           {/* Right Column */}
           <div className="space-y-4">
             {/* Export / Backup */}
-            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 space-y-3">
-              <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Export / Backup</h3>
+            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300 space-y-3">
+              <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Download & Backup</h3>
               <div className="grid grid-cols-2 gap-2">
-                <button onClick={handleCSV} className="min-h-[48px] bg-white border border-slate-200 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                <button onClick={handleCSV} className="min-h-[48px] bg-white border border-slate-300 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Download size={20} />
-                  <span className="text-xs">Export CSV</span>
+                  <span className="text-xs">Download Report</span>
                 </button>
-                <button onClick={handleExportBackup} className="min-h-[48px] bg-white border border-slate-200 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                <button onClick={handleExportBackup} className="min-h-[48px] bg-white border border-slate-300 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Database size={20} />
-                  <span className="text-xs">Export Backup</span>
+                  <span className="text-xs">Save Data</span>
                 </button>
-                <button onClick={() => { setShowImportDialog(true); setBackupPreview(null); }} className="min-h-[48px] bg-white border border-slate-200 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                <button onClick={() => { setShowImportDialog(true); setBackupPreview(null); }} className="min-h-[48px] bg-white border border-slate-300 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Upload size={20} />
-                  <span className="text-xs">Import Backup</span>
+                  <span className="text-xs">Restore Data</span>
                 </button>
               </div>
             </div>
 
             {/* Danger Zone */}
-            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 space-y-3">
-              <h3 className="text-xs font-semibold text-rose-600 uppercase tracking-wider">Danger Zone</h3>
+            <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300 space-y-3">
+              <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Data</h3>
               {activeWallet && (
                 <button onClick={handleClearData} className="w-full min-h-[48px] bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
                   <Trash2 size={20} />
@@ -331,12 +329,12 @@ const SettingsPage: React.FC = () => {
                 </button>
               )}
               {isSharedWallet && (
-                <button onClick={handleLeaveOrDelete} className="w-full min-h-[48px] bg-rose-600 border border-rose-700 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-700 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
+                <button onClick={handleLeaveOrDelete} className="w-full min-h-[48px] bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
                   <Trash2 size={20} />
                   <span>{activeWallet?.ownerId === user?.id ? 'Delete Wallet' : 'Leave Wallet'}</span>
                 </button>
               )}
-              <button onClick={handleDeleteAccount} className="w-full min-h-[48px] bg-rose-600 border border-rose-700 text-white rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-700 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
+              <button onClick={handleDeleteAccount} className="w-full min-h-[48px] bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
                 <Trash2 size={20} />
                 <span>{user?.type === 'user' ? 'Delete Account' : 'Clear Local Data'}</span>
               </button>
@@ -346,7 +344,7 @@ const SettingsPage: React.FC = () => {
 
         {/* Version */}
         <div className="text-center py-6 space-y-2">
-          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Kharcha Bachau v0.4-beta</p>
+          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Kharcha Bachau v0.5-beta</p>
           <button
             onClick={() => { navigate('/privacy'); }}
             className="text-[11px] text-emerald-600 underline underline-offset-2 hover:text-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 rounded"
@@ -359,7 +357,7 @@ const SettingsPage: React.FC = () => {
         {showImportDialog && (
           <div className="fixed inset-0 z-import flex items-center justify-center p-4 bg-slate-900/60">
             <div className="bg-white rounded-xl p-5 max-w-sm w-full mx-4 animate-scale-in">
-              <h3 className="text-base font-bold text-slate-900 mb-3">Import Backup</h3>
+              <h3 className="text-base font-bold text-slate-900 mb-3">Restore Data</h3>
               
               {backupPreview ? (
                 <>
@@ -373,15 +371,15 @@ const SettingsPage: React.FC = () => {
                   </div>
                   <div className="flex gap-2">
                     <button onClick={() => { setShowImportDialog(false); setBackupPreview(null); setSelectedImportFile(null); }} className="flex-1 min-h-[44px] bg-slate-100 text-slate-700 rounded-xl font-medium active:scale-95 hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Cancel</button>
-                    <button onClick={handleImportConfirmed} className="flex-1 min-h-[44px] bg-emerald-600 text-white rounded-xl font-medium active:scale-95 hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Import</button>
+                    <button onClick={handleImportConfirmed} className="flex-1 min-h-[44px] bg-emerald-600 text-white rounded-xl shadow-md font-semibold active:scale-95 hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Import</button>
                   </div>
                 </>
               ) : (
                 <>
-                  <p className="text-sm text-slate-600 mb-4">Select a backup file to import.</p>
+                  <p className="text-sm text-slate-700 mb-4">Select a backup file to restore your data.</p>
                   <div className="flex gap-2">
                     <button onClick={() => { setShowImportDialog(false); setBackupPreview(null); setSelectedImportFile(null); }} className="flex-1 min-h-[44px] bg-slate-100 text-slate-700 rounded-xl font-medium active:scale-95 hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Cancel</button>
-                    <label className="flex-1 min-h-[44px] bg-emerald-600 text-white rounded-xl font-medium active:scale-95 text-center flex items-center justify-center cursor-pointer hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                    <label className="flex-1 min-h-[44px] bg-emerald-600 text-white rounded-xl shadow-md font-semibold active:scale-95 text-center flex items-center justify-center cursor-pointer hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                       Select File
                       <input type="file" accept=".json" onChange={handleImportFileSelect} className="hidden" />
                     </label>

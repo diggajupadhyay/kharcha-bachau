@@ -47,12 +47,11 @@ export interface Expense {
   };
   createdAt: number;
   splitDetails?: {
-    splitType: 'equal' | 'percentage' | 'custom';
+    splitType: 'equal';
     participants: Array<{
       userId: string;
       userName: string;
       amount: number; // Amount this person owes
-      percentage?: number; // If percentage split
     }>;
     paidBy: string; // User ID who paid
     settlements?: Array<{

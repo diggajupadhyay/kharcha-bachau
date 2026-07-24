@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, connectAuthEmulator } from 'firebase/auth';
-import { getFirestore, enableMultiTabIndexedDbPersistence, connectFirestoreEmulator } from 'firebase/firestore';
+import { getAuth } from 'firebase/auth';
+import { getFirestore, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
 
 const requiredEnvVars = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,

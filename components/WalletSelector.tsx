@@ -46,7 +46,7 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
 
   if (!isOpen) return null;
 
-  const handleCopyInviteCode = async (code: string, walletName: string) => {
+  const handleCopyInviteCode = async (code: string) => {
     try {
       await navigator.clipboard.writeText(code);
       showNotification('success', 'Invite code copied to clipboard');
@@ -116,7 +116,7 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
               </h2>
               {mode !== 'select' && (
                   <button onClick={() => { setMode('select'); setInputValue(''); setInputError(''); }} className="min-w-[44px] min-h-[44px] bg-slate-100 rounded-xl active:scale-95 hover:bg-slate-200 transition-colors flex items-center justify-center focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
-                      <X size={20} className="text-slate-600"/>
+                      <X size={20} className="text-slate-700"/>
                   </button>
               )}
           </div>
@@ -131,10 +131,10 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
                       <div key={wallet.id}>
                         <button
                           onClick={() => { switchWallet(wallet.id); onClose(); }}
-                          className={`w-full p-3.5 rounded-xl flex items-center justify-between border active:scale-[0.98] min-h-[56px] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 ${activeWallet?.id === wallet.id ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-200'}`}
+                          className={`w-full p-3.5 rounded-xl flex items-center justify-between border active:scale-[0.98] min-h-[56px] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 ${activeWallet?.id === wallet.id ? 'bg-emerald-50 border-emerald-300' : 'bg-white border-slate-300'}`}
                         >
                           <div className="flex items-center gap-3 flex-1 min-w-0">
-                            <div className={`min-w-[40px] min-h-[40px] rounded-xl flex items-center justify-center ${activeWallet?.id === wallet.id ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                            <div className={`min-w-[40px] min-h-[40px] rounded-xl flex items-center justify-center ${activeWallet?.id === wallet.id ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-700'}`}>
                               <Wallet size={20} />
                             </div>
                             <div className="text-left flex-1 min-w-0">
@@ -144,11 +144,11 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
                                   <span className="text-[10px] font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Personal</span>
                                 )}
                               </div>
-                              <p className="text-xs text-slate-500">{wallet.members.length} member{wallet.members.length > 1 ? 's' : ''}</p>
+                              <p className="text-xs text-slate-700">{wallet.members.length} member{wallet.members.length > 1 ? 's' : ''}</p>
                               {isGroupWallet && inviteCode && (
                                 <div className="flex items-center gap-1.5 mt-1">
                                   <p className="text-xs text-indigo-600 font-medium">Code: {inviteCode}</p>
-                                  <button onClick={(e) => { e.stopPropagation(); handleCopyInviteCode(inviteCode, wallet.name); }}
+                                   <button onClick={(e) => { e.stopPropagation(); handleCopyInviteCode(inviteCode); }}
                                     className="min-w-[32px] min-h-[32px] bg-indigo-100 text-indigo-600 rounded-lg active:scale-95 flex items-center justify-center hover:bg-indigo-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2" title="Copy invite code">
                                     <Share2 size={14} />
                                   </button>
@@ -164,11 +164,11 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
                   
                   {user?.type === 'user' && (
                     <div className="grid grid-cols-2 gap-2 mt-4">
-                        <button onClick={() => setMode('create')} className="min-h-[52px] border-2 border-dashed border-slate-300 rounded-xl text-slate-600 font-medium flex flex-col items-center justify-center gap-1 active:scale-95 hover:border-emerald-300 hover:text-emerald-600 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                        <button onClick={() => setMode('create')} className="min-h-[52px] border-2 border-dashed border-slate-300 rounded-xl text-slate-700 font-medium flex flex-col items-center justify-center gap-1 active:scale-95 hover:border-emerald-300 hover:text-emerald-600 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                             <Plus size={20} />
                             <span className="text-xs">{'Create'}</span>
                         </button>
-                        <button onClick={() => setMode('join')} className="min-h-[52px] border-2 border-dashed border-slate-300 rounded-xl text-slate-600 font-medium flex flex-col items-center justify-center gap-1 active:scale-95 hover:border-emerald-300 hover:text-emerald-600 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                        <button onClick={() => setMode('join')} className="min-h-[52px] border-2 border-dashed border-slate-300 rounded-xl text-slate-700 font-medium flex flex-col items-center justify-center gap-1 active:scale-95 hover:border-emerald-300 hover:text-emerald-600 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                             <Users size={20} />
                             <span className="text-xs">Join</span>
                         </button>
@@ -179,16 +179,17 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
               <form onSubmit={handleSubmit} className="space-y-4 pb-4">
                   <div>
                       <label className="text-xs font-medium text-slate-700 block mb-2">
-                          {mode === 'create' ? 'Wallet Name' : 'Invite Code'}
+                          {'Join a Shared Wallet'}
                       </label>
+                      <p className="text-xs text-slate-700 mb-2">Ask your family member for their wallet code</p>
                       <input type="text" value={inputValue} onChange={(e) => { setInputValue(e.target.value); if (inputError) setInputError(''); }}
                         maxLength={mode === 'create' ? 30 : 20}
                         aria-invalid={!!inputError}
-                        placeholder={mode === 'create' ? "e.g. Home Expenses" : "e.g. HK-1234"} autoFocus
-                        className={`w-full bg-white border min-h-[48px] px-3.5 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 ${inputError ? 'border-rose-400 focus:ring-rose-500' : 'border-slate-200 focus:ring-emerald-500'}`} />
+                        placeholder={"e.g. HK-1234"} autoFocus
+                        className={`w-full bg-white border min-h-[48px] px-3.5 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 ${inputError ? 'border-rose-400 focus:ring-rose-500' : 'border-slate-300 focus:ring-emerald-500'}`} />
                       {inputError && <p className="text-xs text-rose-600 mt-1.5">{inputError}</p>}
                   </div>
-                  <button type="submit" disabled={isLoading || !inputValue.trim()} className="w-full min-h-[48px] bg-emerald-600 text-white rounded-xl text-sm font-medium active:scale-95 disabled:opacity-50 hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                  <button type="submit" disabled={isLoading || !inputValue.trim()} className="w-full min-h-[48px] bg-emerald-600 text-white rounded-xl shadow-md text-sm font-semibold active:scale-95 disabled:opacity-50 hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                       {isLoading ? 'Processing...' : (mode === 'create' ? 'Create' : 'Join Wallet')}
                   </button>
               </form>

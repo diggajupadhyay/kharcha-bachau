@@ -2,7 +2,7 @@ import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
-import { Users, Check, Loader2, X } from 'lucide-react';
+import { Users, Check, Loader2 } from 'lucide-react';
 
 interface BalanceSummaryProps {
   onSettle?: (expenseId: string, fromUserId: string, toUserId: string) => void | Promise<void>;

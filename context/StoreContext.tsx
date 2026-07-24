@@ -12,7 +12,6 @@ const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 const ACTIVE_WALLET_KEY = 'kharcha_bachau_active_wallet_id';
 const WALLETS_CACHE_KEY = 'kharcha_bachau_wallets_cache';
-const CUSTOM_CATEGORIES_KEY = 'kharcha_bachau_custom_categories';
 const READ_NOTIFICATIONS_KEY = 'kharcha_bachau_read_notifications';
 const DISMISSED_NOTIFICATIONS_KEY = 'kharcha_bachau_dismissed_notifications';
 

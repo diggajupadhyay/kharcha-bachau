@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useRef } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useFocusTrap } from '../hooks/useFocusTrap';
-import { X, Plus, Search } from 'lucide-react';
+import { X, Search } from 'lucide-react';
 import { Category } from '../types';
 import AddExpenseModal from './AddExpenseModal';
+import { getCategoryIcon, parseCategoryColor } from '../utils/categoryIcons';
 
 interface QuickAddModalProps {
   isOpen: boolean;
@@ -15,7 +16,13 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
 
   const sortedCategories = useMemo(() => {
-    return getAllCategories().sort((a, b) => a.name.localeCompare(b.name));
+    return getAllCategories().sort((a, b) => {
+      const aIsOther = a.name.toLowerCase() === 'other';
+      const bIsOther = b.name.toLowerCase() === 'other';
+      if (aIsOther && !bIsOther) return 1;
+      if (!aIsOther && bIsOther) return -1;
+      return a.name.localeCompare(b.name);
+    });
   }, [getAllCategories]);
 
   const [search, setSearch] = useState('');
@@ -27,11 +34,6 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
     if (!q) return sortedCategories;
     return sortedCategories.filter(c => c.name.toLowerCase().includes(q));
   }, [sortedCategories, search]);
-
-  const otherCategory = useMemo(
-    () => sortedCategories.find(c => c.id === 'other') || sortedCategories[0],
-    [sortedCategories]
-  );
 
   if (!isOpen) return null;
 
@@ -67,7 +69,7 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
             }}
           >
             <div className="w-10 h-1 bg-slate-200 rounded-full mx-auto mt-3 sm:hidden" />
-            <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-6 pb-3 border-b border-slate-200 flex-shrink-0">
+            <div className="flex items-center justify-between px-4 sm:px-6 pt-4 sm:pt-6 pb-3 border-b border-slate-300 flex-shrink-0">
               <h2 id="quick-add-title" className="text-base sm:text-lg font-bold text-slate-900">{'Quick Add'}</h2>
               <button onClick={handleClose} className="min-w-[44px] min-h-[44px] text-slate-600 hover:bg-slate-100 rounded-xl active:scale-95 flex items-center justify-center transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2" aria-label="Close">
                 <X size={20} />
@@ -81,7 +83,7 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Search categories"
-                  className="w-full min-h-[44px] pl-9 pr-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                  className="w-full min-h-[44px] pl-9 pr-3 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                   aria-label="Search categories"
                 />
               </div>
@@ -92,29 +94,21 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
                   <button
                     key={cat.id}
                     onClick={() => handleCategorySelect(cat)}
-                    className="flex flex-col items-center gap-1.5 p-2.5 sm:p-3 md:p-4 bg-white rounded-xl border border-slate-200 active:scale-95 hover:shadow-md hover:border-emerald-300 transition-all select-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    className="flex flex-col items-center gap-1.5 p-2.5 sm:p-3 md:p-4 bg-white rounded-xl border border-slate-300 active:scale-95 hover:shadow-md hover:border-emerald-300 transition-all select-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                     aria-label={cat.name}
                   >
-                    <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 lg:w-20 lg:h-20 rounded-xl flex items-center justify-center text-2xl sm:text-3xl md:text-4xl bg-slate-50">
-                      <span>{cat.emoji}</span>
+                    <div className={`w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 lg:w-20 lg:h-20 rounded-xl flex items-center justify-center ${parseCategoryColor(cat.color).bg}`}>
+                      {(() => {
+                        const Icon = getCategoryIcon(cat.id);
+                        const { text } = parseCategoryColor(cat.color);
+                        return Icon ? <Icon size={24} className={text} /> : <span className={text}>{cat.emoji}</span>;
+                      })()}
                     </div>
                     <p className="text-[11px] sm:text-xs md:text-sm lg:text-base font-medium text-slate-700 text-center leading-tight">
                       {cat.name}
                     </p>
                   </button>
                 ))}
-                {!search.trim() && (
-                  <button
-                    onClick={() => handleCategorySelect(otherCategory)}
-                    className="flex flex-col items-center gap-1.5 p-2.5 sm:p-3 md:p-4 bg-white rounded-xl border border-dashed border-slate-300 active:scale-95 hover:shadow-md transition-all select-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                    aria-label="Other"
-                  >
-                    <div className="w-12 h-12 sm:w-14 sm:h-14 md:w-16 md:h-16 rounded-xl flex items-center justify-center text-2xl sm:text-3xl md:text-4xl bg-slate-50 text-slate-400">
-                      <Plus size={28} />
-                    </div>
-                    <p className="text-[11px] sm:text-xs md:text-sm font-medium text-slate-500 text-center leading-tight">Other</p>
-                  </button>
-                )}
               </div>
               {search.trim() && filteredCategories.length === 0 && (
                 <p className="text-center text-sm text-slate-400 py-8">No categories match "{search}"</p>

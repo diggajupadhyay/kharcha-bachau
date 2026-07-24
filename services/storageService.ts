@@ -4,8 +4,7 @@ import { isSplitSumValid } from '../utils/split';
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   collection, query, where, orderBy, limit,
-  writeBatch, onSnapshot, arrayRemove, arrayUnion,
-  DocumentData
+  writeBatch, onSnapshot, arrayRemove, arrayUnion
 } from 'firebase/firestore';
 
 const GUEST_DATA_KEY = 'daily_expenses_guest_v1';
@@ -433,7 +432,7 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
     if (expense.note && expense.note.length > 500) throw new Error("Note too long (max 500 characters)");
 
     if (expense.splitDetails) {
-        const { splitType, participants, paidBy } = expense.splitDetails;
+        const { participants, paidBy } = expense.splitDetails;
         if (!paidBy || !participants || participants.length === 0) {
             throw new Error("Invalid split details");
         }

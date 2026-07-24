@@ -1,15 +1,15 @@
-import React, { useMemo, useState, useEffect, useCallback } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
-import { useAuth } from '../context/AuthContext';
 import { Trash2, Search, X, Users } from 'lucide-react';
 import { format, subDays, startOfYear } from 'date-fns';
 import AuthModal from '../components/AuthModal';
 import EditExpenseModal from '../components/EditExpenseModal';
 import BalanceSummary from '../components/BalanceSummary';
-import NotificationBell from '../components/NotificationBell';
+import ConfirmDialog from '../components/ConfirmDialog';
 import { TransactionListSkeleton } from '../components/Skeleton';
 import { Expense } from '../types';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
+import { getCategoryIcon, parseCategoryColor } from '../utils/categoryIcons';
 
 export interface FilterState {
   dateRange: {
@@ -34,10 +34,10 @@ const monthEnd = (d: Date) => {
 
 
 const History: React.FC = () => {
-  const { expenses, deleteExpense, restoreExpense, budget, monthlyStats, activeWallet, markSettlement, isSyncing } = useStore();
-  const { user } = useAuth();
+  const { expenses, deleteExpense, restoreExpense, budget, monthlyStats, activeWallet, markSettlement, isSyncing, getAllCategories } = useStore();
   const [isAuthOpen, setIsAuthOpen] = useState(false);
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Expense | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Expense | null>(null);
   
   // Filter state — single source of truth (advancedFilters drives everything)
@@ -49,14 +49,6 @@ const History: React.FC = () => {
     amountRange: {}
   });
   
-  // Whether any filter deviates from the default (this month, no category/tag/amount filters)
-  const isFilterActive = useMemo(() => {
-    const { dateRange, categories, amountRange } = advancedFilters;
-    const dateActive = dateRange.type === 'custom' || (dateRange.type === 'preset' && dateRange.preset !== 'thisMonth');
-    const categoryActive = categories.length > 0;
-    const amountActive = amountRange.min !== undefined || amountRange.max !== undefined;
-    return dateActive || categoryActive || amountActive;
-  }, [advancedFilters]);
   
   // Recalculate currentDate at midnight
   const [currentDate, setCurrentDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -67,7 +59,6 @@ const History: React.FC = () => {
     return () => clearTimeout(timer);
   }, []);
 
-  const isGuest = useMemo(() => user?.type === 'guest', [user]);
   const currencySymbol = useMemo(() => getCurrencySymbol(), []);
 
   // --- Filtering Logic (single advancedFilters model) ---
@@ -173,33 +164,11 @@ const History: React.FC = () => {
       return sortedGroups;
   }, [visibleExpenses]);
 
-  // Calculate Summary for the filtered view
-  const summary = useMemo(() => {
-      const total = filteredExpenses.reduce((s, e) => s + e.amount, 0);
-      return { total };
-  }, [filteredExpenses]);
-
-  // Member spending breakdown (for group wallets)
-  const memberSpending = useMemo(() => {
-    if (!activeWallet || activeWallet.isPersonal || activeWallet.members.length === 1) {
-      return null;
-    }
-
-    const memberTotals: Record<string, { name: string; total: number; count: number }> = {};
-    
-    filteredExpenses.forEach(e => {
-      const uid = e.createdBy?.uid || 'unknown';
-      const name = e.createdBy?.name || 'Unknown';
-      
-      if (!memberTotals[uid]) {
-        memberTotals[uid] = { name, total: 0, count: 0 };
-      }
-      memberTotals[uid].total += e.amount;
-      memberTotals[uid].count += 1;
-    });
-
-    return Object.values(memberTotals).sort((a, b) => b.total - a.total);
-  }, [filteredExpenses, activeWallet]);
+  const categoryColorMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    getAllCategories().forEach(c => { map[c.id] = c.color || 'bg-slate-100 text-slate-700'; });
+    return map;
+  }, [getAllCategories]);
 
   const getDateHeader = (dateStr: string) => {
       if (dateStr === currentDate) return 'Today';
@@ -212,15 +181,20 @@ const History: React.FC = () => {
   // Budget calculations
   const currentMonthSpending = monthlyStats.currentMonthSpending;
   const budgetProgress = Math.min((currentMonthSpending / budget) * 100, 100);
-  const isOverBudget = currentMonthSpending > budget;
   
   // Check if current wallet is a group wallet
   const isGroupWallet = activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1;
 
-  // Delete with Undo: deletion commits immediately; Undo restores within the window
-  const handleDelete = (item: Expense) => {
-    deleteExpense(item.id);
-    setPendingDelete(item);
+  // Delete with Undo: confirmation first, then deletion commits immediately; Undo restores
+  const handleDeleteConfirm = () => {
+    if (!confirmDelete) return;
+    deleteExpense(confirmDelete.id);
+    setPendingDelete(confirmDelete);
+    setConfirmDelete(null);
+  };
+
+  const handleDeleteClick = (item: Expense) => {
+    setConfirmDelete(item);
   };
 
   useEffect(() => {
@@ -250,63 +224,70 @@ const History: React.FC = () => {
         <div>
           <h1 className="text-lg sm:text-xl md:text-2xl font-bold text-slate-900 mb-0.5">History</h1>
           {activeWallet && (
-            <p className="text-xs sm:text-sm text-slate-600">{activeWallet.name}</p>
+            <p className="text-xs sm:text-sm text-slate-700">{activeWallet.name}</p>
           )}
         </div>
-        <NotificationBell />
        </div>
 
-       {/* Budget Progress + Summary — responsive row on desktop */}
-       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-        <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200">
-           <p className="text-xs sm:text-sm font-medium text-slate-600 mb-2">Monthly Spending</p>
-           <div className="flex items-baseline gap-1.5 mb-2">
-              <span className="text-lg sm:text-xl font-bold text-slate-900">{currencySymbol} {currentMonthSpending.toLocaleString()}</span>
-              <span className="text-xs sm:text-sm text-slate-500">/ {budget.toLocaleString()}</span>
-           </div>
-           <div className="h-2 w-full bg-slate-100 rounded-full overflow-hidden">
-              <div 
-                className={`h-full rounded-full ${isOverBudget ? 'bg-rose-600' : 'bg-emerald-600'}`} 
-                style={{ width: `${budgetProgress}%` }} 
-              />
-           </div>
-        </div>
-        
-        {/* Summary Bar */}
-        <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-200 flex items-center justify-center">
-            <div className="text-center">
-                <p className="text-xs md:text-sm lg:text-base font-medium text-slate-500 mb-0.5 md:mb-1">Total Spent</p>
-                <p className="text-xl md:text-2xl lg:text-3xl font-bold text-rose-600">{currencySymbol} {summary.total.toLocaleString()}</p>
+        {/* Budget Progress + Summary — single merged card */}
+        <div className="mb-4">
+         <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300">
+            <p className="text-xs sm:text-sm font-medium text-slate-700 mb-2">Monthly Spending</p>
+            <div className="flex items-baseline gap-1.5 mb-3">
+               <span className="text-lg sm:text-xl font-bold text-slate-900">{currencySymbol} {currentMonthSpending.toLocaleString()}</span>
+               <span className="text-xs sm:text-sm text-slate-700">/ {budget.toLocaleString()}</span>
             </div>
+            <div className="h-5 w-full bg-slate-100 rounded-full overflow-hidden">
+               <div 
+                 className={`h-full rounded-full transition-all duration-300 ${
+                   budgetProgress > 100
+                     ? 'bg-rose-600'
+                     : budgetProgress > 80
+                       ? 'bg-orange-500'
+                       : budgetProgress > 50
+                         ? 'bg-yellow-500'
+                         : 'bg-emerald-500'
+                 }`}
+                 style={{ width: `${Math.min(budgetProgress, 100)}%` }}
+               />
+            </div>
+            <div className="flex justify-between items-center mt-2">
+              <span className="text-xs text-slate-700">Progress</span>
+              <span className={`text-xs font-semibold ${
+                budgetProgress > 100 ? 'text-rose-600' : 'text-slate-700'
+              }`}>
+                {budgetProgress.toFixed(1)}%
+              </span>
+            </div>
+         </div>
         </div>
-       </div>
 
         {/* Filters Row — consistent 44px+ tap/click targets */}
 <div className="mb-4 flex items-center gap-2 flex-wrap">
             <button
                 onClick={() => setShowSearch(!showSearch)}
-                 className="min-w-[44px] min-h-[44px] bg-white border border-slate-200 rounded-xl flex items-center justify-center active:scale-95 hover:shadow-md hover:bg-slate-100 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                 className="min-w-[44px] min-h-[44px] bg-white border border-slate-300 rounded-xl flex items-center justify-center active:scale-95 hover:shadow-md hover:bg-slate-100 transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
                 aria-label="Search"
             >
-                <Search size={20} className="text-slate-600" />
+                <Search size={20} className="text-slate-700" />
             </button>
             
             <div className="flex gap-1.5 flex-1 flex-wrap">
                 <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'today' } }))}
                   className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                    advancedFilters.dateRange.preset === 'today' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                    advancedFilters.dateRange.preset === 'today' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-200'
                   }`}>Today</button>
                 <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'yesterday' } }))}
                   className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                    advancedFilters.dateRange.preset === 'yesterday' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                    advancedFilters.dateRange.preset === 'yesterday' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-200'
                   }`}>Yesterday</button>
                 <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'thisMonth' } }))}
                   className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                    advancedFilters.dateRange.preset === 'thisMonth' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                    advancedFilters.dateRange.preset === 'thisMonth' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-200'
                   }`}>Month</button>
                 <button onClick={() => setAdvancedFilters(prev => ({ ...prev, dateRange: { type: 'preset', preset: 'all' } }))}
                   className={`h-11 px-3 rounded-xl text-xs sm:text-sm font-medium active:scale-95 hover:shadow-md transition-all focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                    advancedFilters.dateRange.preset === 'all' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-200 text-slate-700 hover:bg-slate-200'
+                    advancedFilters.dateRange.preset === 'all' ? 'bg-emerald-600 text-white hover:bg-emerald-700' : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-200'
                   }`}>All</button>
             </div>
        </div>
@@ -320,12 +301,12 @@ const History: React.FC = () => {
                    placeholder="Search expenses" 
                    value={searchTerm}
                    onChange={e => setSearchTerm(e.target.value)}
-                   className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-200 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                   className="w-full pl-10 pr-10 py-2.5 bg-white border border-slate-300 rounded-lg text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500"
                    autoFocus
                />
                <button
                    onClick={() => { setShowSearch(false); setSearchTerm(''); }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 active:scale-95 hover:text-slate-600 transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 active:scale-95 hover:text-slate-700 transition-colors"
                >
                    <X size={18} />
                </button>
@@ -360,10 +341,14 @@ const History: React.FC = () => {
                                    tabIndex={0}
                                    aria-label={`${item.categoryName} ${currencySymbol} ${item.amount}`}
                                     onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingExpense(item); } }}
-                                     className="bg-white p-3 md:p-4 lg:p-5 rounded-xl border border-slate-200 flex items-center gap-3 md:gap-4 lg:gap-5 active:scale-95 cursor-pointer select-none hover:shadow-md transition-shadow focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                                     className="bg-white p-3 md:p-4 lg:p-5 rounded-xl border border-slate-300 flex items-center gap-3 md:gap-4 lg:gap-5 active:scale-95 cursor-pointer select-none hover:shadow-md transition-shadow focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
                                 >
-                                    <div className="w-10 h-10 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-lg flex items-center justify-center text-xl md:text-2xl lg:text-3xl flex-shrink-0 bg-slate-50 relative">
-                                        {item.categoryEmoji}
+                                     <div className={`w-10 h-10 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-lg flex items-center justify-center text-xl md:text-2xl lg:text-3xl flex-shrink-0 relative ${parseCategoryColor(categoryColorMap[item.categoryId]).bg}`}>
+                                       {(() => {
+                                         const Icon = getCategoryIcon(item.categoryId);
+                                         const { text } = parseCategoryColor(categoryColorMap[item.categoryId]);
+                                         return Icon ? <Icon size={22} className={text} /> : <span className={text}>{item.categoryEmoji}</span>;
+                                       })()}
                                         {item.splitDetails && (
                                           <div className="absolute -top-1 -right-1 w-4 h-4 md:w-5 md:h-5 lg:w-6 lg:h-6 bg-emerald-600 rounded-full flex items-center justify-center">
                                             <Users size={10} className="md:w-3 md:h-3 lg:w-4 lg:h-4 text-white" />
@@ -385,7 +370,7 @@ const History: React.FC = () => {
                                             </span>
                                         </div>
 {item.note && (
-                                        <p className="text-xs text-slate-500 truncate">{item.note}</p>
+                                        <p className="text-xs text-slate-700 truncate">{item.note}</p>
                                     )}
                                    {item.splitDetails && (
                                        <p className="text-[10px] text-slate-400 mt-0.5">
@@ -397,13 +382,13 @@ const History: React.FC = () => {
                                        <p className="text-[10px] text-slate-400 mt-0.5">Added by {item.createdBy.name}</p>
                                    )}
                                </div>
-                               <button 
-                                   onClick={(e) => { e.stopPropagation(); handleDelete(item); }}
-                                    className="min-w-[44px] min-h-[44px] text-slate-400 active:scale-95 flex-shrink-0 flex items-center justify-center hover:text-rose-600 hover:bg-rose-50 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500"
-                                   aria-label={`Delete ${item.categoryName}`}
-                                >
-                                    <Trash2 size={18} />
-                                </button>
+                                <button 
+                                    onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}
+                                     className="min-w-[44px] min-h-[44px] text-slate-400 active:scale-95 flex-shrink-0 flex items-center justify-center hover:text-rose-600 hover:bg-rose-50 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500"
+                                    aria-label={`Delete ${item.categoryName}`}
+                                 >
+                                     <Trash2 size={18} />
+                                 </button>
                            </div>
                            );
                        })}
@@ -414,7 +399,7 @@ const History: React.FC = () => {
            {hasMore && (
              <button
                onClick={() => setVisibleCount(c => c + PAGE_SIZE)}
-               className="w-full mt-2 py-3 bg-white border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 active:scale-95 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+               className="w-full mt-2 py-3 bg-white border border-slate-300 rounded-xl text-sm font-semibold text-slate-700 active:scale-95 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
              >
                Show more ({filteredExpenses.length - visibleExpenses.length} more)
              </button>
@@ -427,13 +412,13 @@ const History: React.FC = () => {
             </div>
             {expenses.length === 0 ? (
               <>
-                <p className="text-base font-semibold text-slate-600 mb-1">No expenses yet</p>
-                <p className="text-sm text-slate-500">Click the + button to log your first expense</p>
+                <p className="text-base font-semibold text-slate-700 mb-1">No expenses yet</p>
+                <p className="text-sm text-slate-700">Tap the + in the bottom nav to log your first expense</p>
               </>
             ) : (
               <>
-                <p className="text-base font-semibold text-slate-600 mb-1">No transactions found</p>
-                <p className="text-sm text-slate-500">Try adjusting your filters</p>
+                <p className="text-base font-semibold text-slate-700 mb-1">No transactions found</p>
+                <p className="text-sm text-slate-700">Try adjusting your filters</p>
               </>
             )}
           </div>
@@ -462,6 +447,15 @@ const History: React.FC = () => {
           expense={editingExpense}
           isOpen={!!editingExpense}
           onClose={() => setEditingExpense(null)}
+        />
+        <ConfirmDialog
+          isOpen={!!confirmDelete}
+          title="Delete Expense"
+          message="Delete this expense? This cannot be undone."
+          confirmLabel="Delete"
+          destructive
+          onConfirm={handleDeleteConfirm}
+          onCancel={() => setConfirmDelete(null)}
         />
       </div>
     </div>

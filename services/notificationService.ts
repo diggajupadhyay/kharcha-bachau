@@ -1,4 +1,4 @@
-import { Expense, Wallet } from '../types';
+import { Expense } from '../types';
 
 const currencySymbol = 'Rs.';
 

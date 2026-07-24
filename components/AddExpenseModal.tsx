@@ -4,6 +4,7 @@ import { useFocusTrap } from '../hooks/useFocusTrap';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
+import { getCategoryIcon, parseCategoryColor } from '../utils/categoryIcons';
 import { X, Delete, Check, Users } from 'lucide-react';
 import { format } from 'date-fns';
 
@@ -96,11 +97,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
     return amount !== '0' || note.trim().length > 0;
   }, [amount, note]);
 
-  const safeClose = useCallback(() => {
-    if (hasUnsavedData) {
-      if (!window.confirm('Discard this expense? Changes will be lost.')) return;
-    }
-    onClose();
+  const resetForm = useCallback(() => {
     setAmount('0');
     setAmountError(false);
     setNote('');
@@ -108,7 +105,20 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
     setIsSplitMode(false);
     setSelectedMembers([]);
     setPaidBy('');
-  }, [hasUnsavedData, onClose]);
+  }, []);
+
+  const safeClose = useCallback(() => {
+    if (hasUnsavedData) {
+      if (!window.confirm('Discard this expense? Changes will be lost.')) return;
+    }
+    onClose();
+    resetForm();
+  }, [hasUnsavedData, onClose, resetForm]);
+
+  const submitAndClose = useCallback(() => {
+    onClose();
+    resetForm();
+  }, [onClose, resetForm]);
 
   // Physical keyboard support for the on-screen numeric keypad.
   // Stored in a ref so the listener always sees fresh state closures.
@@ -214,7 +224,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
 
       try {
         await addExpense(val, category, note, selectedDate, splitDetails);
-        safeClose();
+        submitAndClose();
       } catch {
         // Error notification is shown by StoreContext
       }
@@ -256,8 +266,12 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
         {/* Header / Category Info */}
         <div className="flex justify-between items-start mb-4">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-xl flex items-center justify-center text-3xl border bg-slate-50 border-slate-200">
-              {category.emoji}
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center border ${parseCategoryColor(category.color).bg} border-slate-300`}>
+              {(() => {
+                const Icon = getCategoryIcon(category.id);
+                const { text } = parseCategoryColor(category.color);
+                return Icon ? <Icon size={24} className={text} /> : <span className={text}>{category.emoji}</span>;
+              })()}
             </div>
             <div>
               <p className="text-xs font-medium mb-0.5 text-emerald-600">
@@ -273,13 +287,13 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
               type="date"
               value={format(selectedDate, 'yyyy-MM-dd')}
               onChange={(e) => setSelectedDate(new Date(e.target.value))}
-              className="px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
             <button 
                 onClick={safeClose} 
-                className="w-9 h-9 bg-white border border-slate-200 rounded-lg active:scale-95 flex items-center justify-center hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                className="w-9 h-9 bg-white border border-slate-300 rounded-lg active:scale-95 flex items-center justify-center hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
             >
-                <X size={18} className="text-slate-600" />
+                <X size={18} className="text-slate-700" />
             </button>
           </div>
         </div>
@@ -292,7 +306,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                 <input 
                     readOnly
                     value={amount}
-                    className={`w-full text-right text-3xl font-bold bg-white border rounded-xl p-3 pr-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${amountError ? 'border-rose-400' : 'border-slate-200'} ${themeText}`}
+                    className={`w-full text-right text-3xl font-bold bg-white border rounded-xl p-3 pr-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${amountError ? 'border-rose-400' : 'border-slate-300'} ${themeText}`}
                 />
             </div>
             {amountError && (
@@ -305,7 +319,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                     placeholder={"Note..."}
                     value={note}
                     onChange={(e) => setNote(e.target.value)}
-                    className="w-full bg-white border border-slate-200 p-2.5 rounded-xl text-sm font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500"
+                    className="w-full bg-white border border-slate-300 p-2.5 rounded-xl text-sm font-medium text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500"
                 />
             </div>
             
@@ -317,11 +331,11 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                     setIsSplitMode(!isSplitMode);
                   }}
                   className={`w-full p-3 rounded-xl border flex items-center justify-between active:scale-95 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 ${
-                    isSplitMode ? 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100' : 'bg-white border-slate-200 hover:bg-slate-100'
+                    isSplitMode ? 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100' : 'bg-white border-slate-300 hover:bg-slate-100'
                   }`}
                 >
                   <div className="flex items-center gap-2">
-                    <Users size={18} className={isSplitMode ? 'text-emerald-600' : 'text-slate-600'} />
+                    <Users size={18} className={isSplitMode ? 'text-emerald-600' : 'text-slate-700'} />
                     <span className={`text-sm font-medium ${isSplitMode ? 'text-emerald-700' : 'text-slate-700'}`}>
                       {'Split Expense'}
                     </span>
@@ -337,11 +351,11 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                   <div className="mt-3 space-y-3 p-3 bg-slate-50 rounded-xl">
                     {/* Who Paid */}
                     <div>
-                      <label className="text-xs font-medium text-slate-600 block mb-2">{'Who paid?'}</label>
+                      <label className="text-xs font-medium text-slate-700 block mb-2">{'Who paid?'}</label>
                       <select
                         value={paidBy}
                         onChange={(e) => setPaidBy(e.target.value)}
-                        className="w-full bg-white border border-slate-200 p-2 rounded-lg text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500"
+                        className="w-full bg-white border border-slate-300 p-2 rounded-lg text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500"
                       >
                         {availableMembers.map(member => (
                           <option key={member.id} value={member.id}>{member.name}</option>
@@ -351,7 +365,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                     
                     {/* Member Selection */}
                     <div>
-                      <label className="text-xs font-medium text-slate-600 block mb-2">{'Select members'}</label>
+                      <label className="text-xs font-medium text-slate-700 block mb-2">{'Select members'}</label>
                       <div className="space-y-2">
                         {availableMembers.map(member => {
                           const isSelected = selectedMembers.includes(member.id);
@@ -373,7 +387,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                               </button>
                               <span className="text-sm font-medium text-slate-700 flex-1">{member.name}</span>
                               {isSelected && (
-                                <span className="text-xs text-slate-500">
+                                <span className="text-xs text-slate-700">
                                   {currencySymbol}{((parseFloat(amount) || 0) / selectedMembers.length).toFixed(2)} {'per person'}
                                 </span>
                               )}
@@ -385,9 +399,9 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                     
                     {/* Split Preview */}
                     {calculateSplitAmounts && (
-                      <div className="pt-2 border-t border-slate-200">
+                      <div className="pt-2 border-t border-slate-300">
                         <div className="flex justify-between items-center text-xs">
-                          <span className="text-slate-600">{'Total Split'}:</span>
+                          <span className="text-slate-700">{'Total Split'}:</span>
                           <span className="font-semibold text-slate-900">
                             {currencySymbol}{calculateSplitAmounts.reduce((sum: number, p) => sum + p.amount, 0).toFixed(2)}
                           </span>
@@ -413,7 +427,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
             ))}
             <button 
                 onClick={handleDelete}
-                className="h-12 rounded-lg text-base font-bold text-slate-600 bg-white border border-slate-200 active:scale-95 flex items-center justify-center hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+                className="h-12 rounded-lg text-base font-bold text-slate-700 bg-white border border-slate-300 active:scale-95 flex items-center justify-center hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
             >
                 <Delete size={20} />
             </button>
@@ -446,7 +460,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
 const KeypadButton: React.FC<{ children: React.ReactNode; onClick: () => void }> = ({ children, onClick }) => (
     <button 
         onClick={onClick}
-        className="h-12 md:h-14 lg:h-16 rounded-lg text-lg md:text-xl lg:text-2xl font-bold text-slate-800 bg-white border border-slate-200 active:scale-95 hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+        className="h-12 md:h-14 lg:h-16 rounded-lg text-lg md:text-xl lg:text-2xl font-bold text-slate-800 bg-white border border-slate-300 active:scale-95 hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
     >
         {children}
     </button>
