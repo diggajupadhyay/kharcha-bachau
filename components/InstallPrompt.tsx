@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from 'react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
-import { Download, X, Smartphone, Share } from 'lucide-react';
+import { Download, X, Share2, Smartphone } from 'lucide-react';
 
-const DISMISS_KEY = 'kharcha_bachau_install_dismissed';
-const DISMISS_DAYS = 14;
+const DISMISS_KEY = 'kharcha_bachau_install_dismissed_v2';
+const DISMISS_DAYS = 90;
 
 const wasRecentlyDismissed = (): boolean => {
   try {
@@ -37,7 +37,6 @@ const InstallPrompt: React.FC = () => {
   const [isDismissed, setIsDismissed] = useState(() => wasRecentlyDismissed());
   const [showIOS, setShowIOS] = useState(false);
 
-  // iOS Safari never fires beforeinstallprompt — show manual guidance instead.
   useEffect(() => {
     if (isIOS() && !isStandalone() && !wasRecentlyDismissed()) {
       const t = setTimeout(() => setShowIOS(true), 2500);
@@ -64,42 +63,41 @@ const InstallPrompt: React.FC = () => {
   if (!shouldShow) return null;
 
   return (
-    <div
-      className="fixed left-1/2 -translate-x-1/2 w-full max-w-lg sm:max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl z-notification px-4 animate-slide-up-bottom pointer-events-none"
-      style={{ bottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))' }}
-    >
-      <div className="pointer-events-auto bg-white rounded-xl shadow-2xl border border-slate-200 p-4 flex items-center gap-3">
-        <div className="flex-shrink-0 p-2 bg-emerald-50 rounded-xl">
-          <Smartphone className="text-emerald-600" size={22} />
+    <div className="sticky top-0 z-50 px-0" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+      <div className="bg-[#0E1833] text-white px-4 py-2.5 flex items-center gap-3 shadow-lg">
+        <div className="flex-shrink-0">
+          <Smartphone size={18} className="text-[#489240]" />
         </div>
 
         <div className="flex-1 min-w-0">
-          <p className="text-slate-900 font-bold text-sm mb-0.5">Install Kharcha Bachau</p>
+          <p className="font-bold text-sm leading-tight">
+            Install Kharcha Bachau
+          </p>
           {isInstallable ? (
-            <p className="text-slate-500 text-xs">Add to your home screen for quick, offline access</p>
+            <p className="text-white/70 text-xs">Add to home screen for faster, offline access</p>
           ) : (
-            <p className="text-slate-500 text-xs flex items-center gap-1 flex-wrap">
-              Tap <Share size={13} className="inline text-emerald-600" /> then "Add to Home Screen"
+            <p className="text-white/70 text-xs flex items-center gap-1 flex-wrap">
+              Tap <Share2 size={12} className="inline text-white/90" /> then <strong>Add to Home Screen</strong>
             </p>
           )}
         </div>
 
-        <div className="flex items-center gap-1.5 flex-shrink-0">
+        <div className="flex items-center gap-1 flex-shrink-0">
           {isInstallable && (
             <button
               onClick={handleInstall}
-              className="px-4 py-2 bg-emerald-600 text-white rounded-xl font-bold text-sm hover:bg-emerald-700 active:scale-95 transition-all flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+              className="px-3 py-1.5 bg-[#489240] text-white rounded-lg font-bold text-xs hover:bg-[#3d7a36] active:scale-95 transition-all flex items-center gap-1.5 focus-visible:ring-2 focus-visible:ring-[#489240] focus-visible:ring-offset-2 focus-visible:ring-offset-[#0E1833]"
             >
-              <Download size={16} />
+              <Download size={14} />
               Install
             </button>
           )}
           <button
             onClick={dismiss}
-            className="min-w-[44px] min-h-[44px] text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-xl transition-colors flex items-center justify-center focus-visible:ring-2 focus-visible:ring-emerald-500"
+            className="min-w-[36px] min-h-[36px] text-white/60 hover:text-white hover:bg-white/10 rounded-lg transition-colors flex items-center justify-center focus-visible:ring-2 focus-visible:ring-white/50"
             aria-label="Dismiss"
           >
-            <X size={18} />
+            <X size={16} />
           </button>
         </div>
       </div>

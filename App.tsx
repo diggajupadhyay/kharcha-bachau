@@ -2,6 +2,7 @@ import React, { useState, Suspense, useCallback } from 'react';
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
 import { LayoutGrid, Clock, Settings as SettingsIcon, Plus, Loader2 } from 'lucide-react';
 import { useCurrentDate } from './hooks/useCurrentDate';
+import { useRegisterSW } from 'virtual:pwa-register/react';
 
 const Tracker = React.lazy(() => import('./pages/Tracker'));
 const History = React.lazy(() => import('./pages/History'));
@@ -12,6 +13,7 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import ToastContainer from './components/Toast';
 import ErrorBoundary from './components/ErrorBoundary';
 import InstallPrompt from './components/InstallPrompt';
+import UpdatePrompt from './components/UpdatePrompt';
 import OfflineBanner from './components/OfflineBanner';
 import QuickAddModal from './components/QuickAddModal';
 
@@ -20,6 +22,18 @@ const AppContent: React.FC = () => {
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const handleCloseQuickAdd = useCallback(() => setShowQuickAdd(false), []);
   const handleOpenQuickAdd = useCallback(() => setShowQuickAdd(true), []);
+
+  const {
+    needRefresh: [needRefresh, setNeedRefresh],
+    updateServiceWorker,
+  } = useRegisterSW({
+    onNeedRefresh() {
+      setNeedRefresh(true);
+    },
+    onOfflineReady() {
+      console.log('App ready for offline use');
+    },
+  });
 
   const currentDate = useCurrentDate();
 
@@ -32,6 +46,11 @@ const AppContent: React.FC = () => {
           <InstallPrompt />
           <OfflineBanner />
           <ToastContainer />
+          <UpdatePrompt
+            needRefresh={needRefresh}
+            updateServiceWorker={updateServiceWorker}
+            onClose={() => setNeedRefresh(false)}
+          />
 
           <main className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar scroll-smooth bg-slate-50/50 overscroll-behavior-y-contain">
             <Suspense fallback={

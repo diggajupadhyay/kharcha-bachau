@@ -1,57 +1,80 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { viteStaticCopy } from 'vite-plugin-static-copy';
+import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath, URL } from 'url';
 
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
-    viteStaticCopy({
-      targets: [
-        {
-          src: 'manifest.json',
-          dest: ''
-        },
-        {
-          src: 'sw.js',
-          dest: ''
-        },
-        {
-          src: 'public/icon-192.png',
-          dest: ''
-        },
-        {
-          src: 'public/icon-512.png',
-          dest: ''
-        },
-        {
-          src: 'public/icon-180.png',
-          dest: ''
-        },
-        {
-          src: 'public/icon-maskable-192.png',
-          dest: ''
-        },
-        {
-          src: 'public/icon-maskable-512.png',
-          dest: ''
-        },
-        {
-          src: 'public/favicon.ico',
-          dest: ''
-        },
-        {
-          src: 'public/favicon-16x16.png',
-          dest: ''
-        },
-        {
-          src: 'public/favicon-32x32.png',
-          dest: ''
-        }
-      ]
-    })
+    VitePWA({
+      registerType: 'prompt',
+      includeAssets: [
+        'favicon.ico',
+        'favicon-16x16.png',
+        'favicon-32x32.png',
+        'icon-96.png',
+        'icon-144.png',
+        'icon-180.png',
+        'icon-192.png',
+        'icon-256.png',
+        'icon-512.png',
+        'icon-maskable-192.png',
+        'icon-maskable-512.png',
+      ],
+      manifest: {
+        id: '/',
+        name: 'Kharcha Bachau',
+        short_name: 'Kharcha Bachau',
+        description: 'Smart daily expense tracker for Nepal.',
+        start_url: '/',
+        scope: '/',
+        lang: 'en',
+        dir: 'ltr',
+        categories: ['finance', 'productivity'],
+        display: 'standalone',
+        display_override: ['window-controls-overlay', 'standalone', 'minimal-ui'],
+        background_color: '#f8fafc',
+        theme_color: '#0E1833',
+        orientation: 'portrait',
+        prefer_related_applications: false,
+        icons: [
+          { src: 'icon-96.png', sizes: '96x96', type: 'image/png', purpose: 'any' },
+          { src: 'icon-144.png', sizes: '144x144', type: 'image/png', purpose: 'any' },
+          { src: 'icon-180.png', sizes: '180x180', type: 'image/png', purpose: 'apple touch icon' },
+          { src: 'icon-192.png', sizes: '192x192', type: 'image/png', purpose: 'any' },
+          { src: 'icon-256.png', sizes: '256x256', type: 'image/png', purpose: 'any' },
+          { src: 'icon-512.png', sizes: '512x512', type: 'image/png', purpose: 'any' },
+          { src: 'icon-maskable-192.png', sizes: '192x192', type: 'image/png', purpose: 'maskable' },
+          { src: 'icon-maskable-512.png', sizes: '512x512', type: 'image/png', purpose: 'maskable' },
+        ],
+      },
+      workbox: {
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff2}'],
+        navigateFallback: '/index.html',
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-cache',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'gstatic-fonts-cache',
+              expiration: { maxEntries: 10, maxAgeSeconds: 60 * 60 * 24 * 365 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
+      },
+    }),
   ],
   resolve: {
     alias: {
@@ -61,28 +84,23 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
-    chunkSizeWarningLimit: 500, // Warn if chunk exceeds 500KB
+    chunkSizeWarningLimit: 500,
     rollupOptions: {
       output: {
         manualChunks: (id) => {
-          // Vendor chunks — ORDER MATTERS: check more specific before more general
           if (id.includes('node_modules')) {
-            // Lucide icons (must check BEFORE react since path contains "react")
             if (id.includes('lucide-react')) {
               return 'vendor-icons';
             }
-            
-            // React Router + router internals (check BEFORE react since paths may contain "react")
+
             if (id.includes('react-router') || id.includes('@remix-run') || id.includes('/history')) {
               return 'vendor-router';
             }
-            
-            // React, React DOM, scheduler, react-is (React internals)
+
             if (id.includes('react-dom') || id.includes('/react/') || id.includes('scheduler') || id.includes('react-is')) {
               return 'vendor-react';
             }
-            
-            // Firestore transitive deps (protobuf/grpc/idb) — large, cache separately
+
             if (
               id.includes('protobufjs') ||
               id.includes('@grpc') ||
@@ -93,20 +111,14 @@ export default defineConfig({
               return 'vendor-firestore-deps';
             }
 
-            // Firebase (large library)
             if (id.includes('firebase')) {
               return 'vendor-firebase';
             }
-            
-            // Date-fns (medium size - separate)
+
             if (id.includes('date-fns')) {
               return 'vendor-date-fns';
             }
-            
-            // PDF libraries + their heavy optional deps are ONLY reached through
-            // the dynamically-imported pdfService. Return undefined so Rollup
-            // keeps them in the lazy dynamic chunk instead of forcing them into
-            // the eagerly-preloaded main vendor chunk.
+
             if (
               id.includes('jspdf') ||
               id.includes('html2canvas') ||
@@ -121,8 +133,7 @@ export default defineConfig({
             ) {
               return undefined;
             }
-            
-            // Other vendor libraries
+
             return 'vendor';
           }
         }
