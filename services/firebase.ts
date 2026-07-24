@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, enableMultiTabIndexedDbPersistence } from 'firebase/firestore';
+import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager } from 'firebase/firestore';
 
 const requiredEnvVars = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
@@ -43,16 +43,10 @@ if (requiredEnvVars.measurementId) {
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app);
-
-enableMultiTabIndexedDbPersistence(db).catch((err) => {
-  if (import.meta.env.DEV) {
-    if (err.code === 'failed-precondition') {
-      console.warn('Persistence disabled: Multiple tabs open');
-    } else if (err.code === 'unimplemented') {
-      console.warn('Persistence not supported by this browser');
-    }
-  }
+export const db = initializeFirestore(app, {
+  localCache: persistentLocalCache({
+    tabManager: persistentMultipleTabManager()
+  })
 });
 
 export default app;
