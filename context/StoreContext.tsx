@@ -208,16 +208,19 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setIsSyncing(false);
       } else {
           setIsSyncing(true);
+          const hasReceivedData = { current: false };
           const unsubscribe = storage.subscribeToWalletExpenses(
             activeWallet.id,
             (data) => {
+              hasReceivedData.current = true;
               setExpenses(data);
               setIsSyncing(false);
             },
             () => {
-              // Transient sync error — keep last known expenses, just notify.
               setIsSyncing(false);
-              showNotification('error', 'Sync issue — showing last saved data');
+              if (hasReceivedData.current) {
+                showNotification('error', 'Sync issue — showing last saved data');
+              }
             }
           );
           return () => unsubscribe();

@@ -2,7 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { User, AuthContextType } from '../types';
 import { auth } from '../services/firebase';
 import * as storage from '../services/storageService';
-import { onAuthStateChanged, signOut, signInWithPopup, GoogleAuthProvider, deleteUser } from 'firebase/auth';
+import { onAuthStateChanged, signOut, signInWithPopup, signInWithRedirect, getRedirectResult, GoogleAuthProvider, deleteUser } from 'firebase/auth';
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
@@ -75,6 +75,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
+      if (error.code === 'auth/popup-blocked') {
+        try {
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        } catch (redirectError: any) {
+          setIsLoading(false);
+          if (redirectError.code !== 'auth/popup-closed-by-user') {
+            throw redirectError;
+          }
+          return;
+        }
+      }
       setIsLoading(false);
       if (error.code !== 'auth/popup-closed-by-user') {
         if (import.meta.env.DEV) {
@@ -84,6 +96,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
   };
+
+  useEffect(() => {
+    getRedirectResult(auth).then((result) => {
+      if (result) {
+        setIsLoading(false);
+      }
+    }).catch((error) => {
+      setIsLoading(false);
+      if (import.meta.env.DEV) {
+        console.error('Redirect sign-in error:', error.code, error.message);
+      }
+    });
+  }, []);
 
   const continueAsGuest = () => {
     const newGuest = createGuestUser();

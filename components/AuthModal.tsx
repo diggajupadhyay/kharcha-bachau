@@ -24,7 +24,8 @@ const AuthModal: React.FC<AuthModalProps> = ({ isOpen, onClose }) => {
       onClose();
     } catch (error: any) {
       if (error.code !== 'auth/popup-closed-by-user') {
-        showNotification('error', 'Failed to sign in with Google');
+        const msg = error.code === 'auth/popup-blocked' ? 'Pop-up blocked — allow pop-ups or try again' : 'Could not sign in. Make sure pop-ups are allowed and try again.';
+        showNotification('error', msg);
       }
     }
   };

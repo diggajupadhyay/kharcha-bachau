@@ -67,6 +67,21 @@ const SettingsPage: React.FC = () => {
       };
   }, []);
 
+  const handleBackupToCloud = async () => {
+    try {
+      await signInWithGoogle();
+      showNotification('success', 'Signed in with Google');
+    } catch (e: any) {
+      if (e.code === 'auth/popup-closed-by-user') return;
+      const msg = e.code === 'auth/popup-blocked'
+        ? 'Pop-up blocked by your browser. Please allow pop-ups and try again.'
+        : e.code === 'auth/unauthorized-domain'
+        ? 'This domain is not authorized for sign-in. Please contact support.'
+        : 'Could not sign in. Make sure pop-ups are allowed, or try a different browser.';
+      showNotification('error', msg);
+    }
+  };
+
   const handleCSV = () => {
     if (!expenses.length) {
       showNotification('error', 'No data to export');
@@ -231,7 +246,7 @@ const SettingsPage: React.FC = () => {
                 )}
               </div>
               {user?.type === 'guest' && (
-                <button onClick={async () => { try { await signInWithGoogle(); showNotification('success', 'Signed in with Google'); } catch (e: any) { if (e.code !== 'auth/popup-closed-by-user') showNotification('error', 'Failed to sign in'); } }} className="w-full min-h-[48px] bg-slate-900 text-white rounded-xl shadow-md text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                <button onClick={handleBackupToCloud} className="w-full min-h-[48px] bg-slate-900 text-white rounded-xl shadow-md text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Cloud size={20} />
                   <span>Back up Data to Cloud</span>
                 </button>
