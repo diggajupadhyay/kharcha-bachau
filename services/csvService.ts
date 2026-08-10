@@ -9,29 +9,36 @@ export const generateCSVExport = (expenses: Expense[]): void => {
     // CSV Headers
     const headers = ['Date', 'Category', 'Amount (Rs.)', 'Note', 'Added By', 'Created At'];
     
-    // Convert expenses to CSV rows
+    // Spreadsheets execute a leading =, +, - or @ as a formula, so a note written by
+    // one member of a shared wallet could run when another member opens the export.
+    // Prefixing with a tab makes the cell inert while still reading correctly.
+    const neutralise = (value: string): string =>
+        /^[=+\-@\t\r]/.test(value) ? `\t${value}` : value;
+
+    // Every field is quoted, not just the note: a category or display name containing
+    // a comma used to shift all following columns.
+    const cell = (value: unknown): string => {
+        const str = value === null || value === undefined ? '' : String(value);
+        return `"${neutralise(str).replace(/"/g, '""')}"`;
+    };
+
     const rows = expenses.map(expense => {
-        const date = expense.date;
-        const category = `${expense.categoryEmoji} ${expense.categoryName}`;
-        const amount = expense.amount.toFixed(2);
-        const note = (expense.note || '').replace(/"/g, '""'); // Escape quotes in CSV
-        const addedBy = expense.createdBy?.name || 'Guest';
-        const createdAt = format(new Date(expense.createdAt), 'yyyy-MM-dd HH:mm:ss');
-        
-        // Wrap fields in quotes to handle commas and special characters
+        const createdAt = Number.isFinite(expense.createdAt)
+            ? format(new Date(expense.createdAt), 'yyyy-MM-dd HH:mm:ss')
+            : '';
         return [
-            date,
-            category,
-            amount,
-            `"${note}"`,
-            addedBy,
-            createdAt
+            cell(expense.date),
+            cell(`${expense.categoryEmoji} ${expense.categoryName}`),
+            cell(expense.amount.toFixed(2)),
+            cell(expense.note || ''),
+            cell(expense.createdBy?.name || 'Guest'),
+            cell(createdAt)
         ].join(',');
     });
 
     // Combine headers and rows
     const csvContent = [
-        headers.join(','),
+        headers.map(h => `"${h}"`).join(','),
         ...rows
     ].join('\n');
 

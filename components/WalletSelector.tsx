@@ -20,7 +20,7 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [inviteCodes, setInviteCodes] = useState<Record<string, string>>({});
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, isOpen);
+  useFocusTrap(modalRef, isOpen, onClose);
 
   // Load invite codes for group wallets when modal opens
   useEffect(() => {
@@ -141,7 +141,7 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
                               <div className="flex items-center gap-1.5 mb-0.5 flex-wrap">
                                 <p className={`text-sm font-medium truncate ${activeWallet?.id === wallet.id ? 'text-slate-900' : 'text-slate-700'}`}>{wallet.name}</p>
                                 {wallet.isPersonal && (
-                                  <span className="text-[10px] font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Personal</span>
+                                  <span className="text-[11px] font-medium bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded">Personal</span>
                                 )}
                               </div>
                               <p className="text-xs text-slate-700">{wallet.members.length} member{wallet.members.length > 1 ? 's' : ''}</p>
@@ -177,15 +177,24 @@ const WalletSelector: React.FC<WalletSelectorProps> = ({ isOpen, onClose }) => {
               </div>
           ) : (
               <form onSubmit={handleSubmit} className="space-y-4 pb-4">
+                  {/* Label, hint and placeholder all follow `mode`. They used to be
+                      hardcoded to the join flow, so the Create screen told people to
+                      ask someone for a code and showed a code-shaped example. */}
                   <div>
-                      <label className="text-xs font-medium text-slate-700 block mb-2">
-                          {'Join a Shared Wallet'}
+                      <label htmlFor="wallet-input" className="text-xs font-medium text-slate-700 block mb-2">
+                          {mode === 'create' ? 'Name this wallet' : 'Join a shared wallet'}
                       </label>
-                      <p className="text-xs text-slate-700 mb-2">Ask your family member for their wallet code</p>
-                      <input type="text" value={inputValue} onChange={(e) => { setInputValue(e.target.value); if (inputError) setInputError(''); }}
+                      <p className="text-xs text-slate-700 mb-2">
+                          {mode === 'create'
+                            ? 'Something you will recognise later, like "Home" or "Pokhara trip".'
+                            : 'Ask whoever set up the wallet for their invite code.'}
+                      </p>
+                      <input id="wallet-input" type="text" value={inputValue} onChange={(e) => { setInputValue(e.target.value); if (inputError) setInputError(''); }}
                         maxLength={mode === 'create' ? 30 : 20}
                         aria-invalid={!!inputError}
-                        placeholder={"e.g. HK-1234"} autoFocus
+                        autoCapitalize={mode === 'create' ? 'words' : 'characters'}
+                        autoComplete="off"
+                        placeholder={mode === 'create' ? 'e.g. Home' : 'e.g. K7M2QP'} autoFocus
                         className={`w-full bg-white border min-h-[48px] px-3.5 rounded-xl text-sm font-medium text-slate-900 focus:outline-none focus:ring-2 ${inputError ? 'border-rose-400 focus:ring-rose-500' : 'border-slate-300 focus:ring-emerald-500'}`} />
                       {inputError && <p className="text-xs text-rose-600 mt-1.5">{inputError}</p>}
                   </div>

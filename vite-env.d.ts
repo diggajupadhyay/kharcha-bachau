@@ -1,6 +1,9 @@
 /// <reference types="vite/client" />
 /// <reference types="vite-plugin-pwa/client" />
 
+// Injected by Vite from package.json's version field.
+declare const __APP_VERSION__: string;
+
 interface ImportMetaEnv {
   readonly DEV: boolean;
   readonly PROD: boolean;
@@ -12,5 +15,7 @@ interface ImportMetaEnv {
   readonly VITE_FIREBASE_MESSAGING_SENDER_ID: string;
   readonly VITE_FIREBASE_APP_ID: string;
   readonly VITE_FIREBASE_MEASUREMENT_ID: string;
+  // Optional. Endpoint for production crash reports; see components/ErrorBoundary.
+  readonly VITE_ERROR_REPORT_URL?: string;
 }
 

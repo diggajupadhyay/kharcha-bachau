@@ -23,6 +23,10 @@ export interface Wallet {
   currency: string;
   createdAt: number;
   isPersonal?: boolean; // true = personal-only wallet (not shareable), false/undefined = shared wallet
+  inviteCode?: string; // set once for shared wallets; lets members look the code up without listing /invites
+  // uid -> display name. users/{uid} is readable only by its owner, so without this
+  // there is no way to show a member's name until they happen to log an expense.
+  memberProfiles?: Record<string, string>;
 }
 
 export interface Category {
@@ -105,6 +109,10 @@ export interface StoreContextType {
   setBudget: (amount: number) => void;
   monthlyStats: MonthlyStats;
   isSyncing: boolean;
+
+  // Expenses stranded in this device's local storage by an incomplete migration.
+  pendingGuestExpenses: number;
+  retryGuestSync: () => Promise<void>;
   
   addExpense: (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => Promise<void>;
   updateExpense: (id: string, amount: number, note: string) => Promise<void>;
@@ -115,6 +123,7 @@ export interface StoreContextType {
   // Expense Splitting
   getMemberBalances: () => Record<string, number>; // userId -> net balance (positive = owed money, negative = owes money)
   markSettlement: (expenseId: string, fromUserId: string, toUserId: string) => Promise<void>;
+  unmarkSettlement: (expenseId: string, fromUserId: string, toUserId: string) => Promise<void>;
   
   // Category Management
   customCategories: Category[];
@@ -129,11 +138,5 @@ export interface StoreContextType {
   dismissNotification: (id: string) => void;
   triggerHaptic: () => void;
   
-  // App Notifications
-  appNotifications: import('./services/notificationService').AppNotification[];
-  updateAppNotifications: (notifications: import('./services/notificationService').AppNotification[]) => void;
-  markAppNotificationRead: (id: string) => void;
-  dismissAppNotification: (id: string) => void;
-  markAllAppNotificationsRead: () => void;
 }
 

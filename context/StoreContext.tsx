@@ -5,15 +5,24 @@ import * as storage from '../services/storageService';
 import { useAuth } from './AuthContext';
 import { format } from 'date-fns';
 import { EXPENSE_CATEGORIES } from '../constants';
-import { AppNotification, getAllNotifications } from '../services/notificationService';
 import { calculateMemberBalances } from '../utils/balances';
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
 const ACTIVE_WALLET_KEY = 'kharcha_bachau_active_wallet_id';
 const WALLETS_CACHE_KEY = 'kharcha_bachau_wallets_cache';
-const READ_NOTIFICATIONS_KEY = 'kharcha_bachau_read_notifications';
-const DISMISSED_NOTIFICATIONS_KEY = 'kharcha_bachau_dismissed_notifications';
+
+// Last known wallet list for a signed-in user, used when the Firestore read fails.
+const readCachedWallets = (): Wallet[] => {
+  try {
+    const raw = localStorage.getItem(WALLETS_CACHE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? (parsed as Wallet[]) : [];
+  } catch {
+    return [];
+  }
+};
 
 const pad2 = (n: number) => String(n).padStart(2, '0');
 const isoMonthStart = (year: number, month0: number) => `${year}-${pad2(month0 + 1)}-01`;
@@ -33,32 +42,6 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   
   // App State
   const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
-  const [readNotificationIds, setReadNotificationIds] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(READ_NOTIFICATIONS_KEY) || '[]'));
-    } catch {
-      return new Set<string>();
-    }
-  });
-  const [dismissedNotificationIds, setDismissedNotificationIds] = useState<Set<string>>(() => {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(DISMISSED_NOTIFICATIONS_KEY) || '[]'));
-    } catch {
-      return new Set<string>();
-    }
-  });
-
-  const persistReadIds = useCallback((ids: Set<string>) => {
-    setReadNotificationIds(ids);
-    localStorage.setItem(READ_NOTIFICATIONS_KEY, JSON.stringify([...ids]));
-  }, []);
-
-  const persistDismissedIds = useCallback((ids: Set<string>) => {
-    setDismissedNotificationIds(ids);
-    localStorage.setItem(DISMISSED_NOTIFICATIONS_KEY, JSON.stringify([...ids]));
-  }, []);
-  
   // Wallet State
   const [wallets, setWallets] = useState<Wallet[]>([]);
   const [activeWallet, setActiveWallet] = useState<Wallet | null>(null);
@@ -76,16 +59,28 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [activeWallet]);
 
-  // Persist full wallet list to localStorage for offline fallback
+  // Persist full wallet list to localStorage for offline fallback.
+  // Never write an empty list: this effect also runs on mount, while `wallets` is
+  // still [], which used to erase the cache before the loader could ever read it —
+  // leaving signed-in users with no wallets at all when offline.
+  // Guest wallets are excluded so the synthetic 'guest_wallet' cannot leak into a
+  // signed-in session's fallback.
   useEffect(() => {
-    localStorage.setItem(WALLETS_CACHE_KEY, JSON.stringify(wallets));
-  }, [wallets]);
+    if (user?.type !== 'user' || wallets.length === 0) return;
+    try {
+      localStorage.setItem(WALLETS_CACHE_KEY, JSON.stringify(wallets));
+    } catch {
+      // Storage full or blocked — the cache is best-effort.
+    }
+  }, [wallets, user]);
 
   // Data State
   const [expenses, setExpenses] = useState<Expense[]>([]);
-  const [budget, setBudgetState] = useState(20000);
+  const [budget, setBudgetState] = useState(storage.DEFAULT_BUDGET);
   const [customCategories, setCustomCategoriesState] = useState<Category[]>([]);
   const [isSyncing, setIsSyncing] = useState(true);
+  // Expenses left behind on this device by a migration that did not finish.
+  const [pendingGuestExpenses, setPendingGuestExpenses] = useState(0);
   
   // Derived Stats
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStats>({
@@ -104,6 +99,30 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       setBudgetState(amount);
       storage.saveStoredBudget(user, activeWallet?.id, amount);
   }, [user, activeWallet?.id]);
+
+  // Publish this user's display name onto the active shared wallet so other members
+  // see a name rather than "Member 8f3a". No-ops when already correct.
+  useEffect(() => {
+    if (!user || !activeWallet) return;
+    storage.ensureMemberProfile(user, activeWallet);
+  }, [user, activeWallet]);
+
+  // Notification/haptic helpers — declared ahead of every effect that lists them as a
+  // dependency, since a dep array is evaluated during render and would otherwise hit
+  // the temporal dead zone.
+  const showNotification = useCallback((type: NotificationType, message: string) => {
+    const id = Math.random().toString(36).substring(2, 11);
+    setNotifications(prev => [...prev, { id, type, message }]);
+    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 3000);
+  }, []);
+
+  const dismissNotification = useCallback((id: string) => {
+    setNotifications(prev => prev.filter(n => n.id !== id));
+  }, []);
+
+  const triggerHaptic = useCallback(() => {
+    if (navigator.vibrate) navigator.vibrate(10);
+  }, []);
 
   useEffect(() => {
       if (!user) {
@@ -124,13 +143,41 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               // Sync guest data first (this will create a personal wallet if guest data exists)
               try {
                   await storage.syncGuestData(user);
+                  setPendingGuestExpenses(0);
               } catch (error) {
-                  // Continue even if sync fails - user can sync later
+                  // Do NOT fail silently. The expenses are still in local storage, but
+                  // cloud mode never reads local storage, so from the user's side they
+                  // have simply vanished right after pressing "Back up Data to Cloud".
+                  const stranded = storage.getPendingGuestExpenseCount();
+                  setPendingGuestExpenses(stranded);
+                  if (stranded > 0) {
+                      showNotification(
+                          'error',
+                          `${stranded} expense${stranded === 1 ? '' : 's'} could not be backed up yet — open Settings to retry`
+                      );
+                  }
               }
               
               // Get all wallets after sync
-              let userWallets = await storage.getUserWallets(user);
-              
+              let userWallets: Wallet[];
+              try {
+                  userWallets = await storage.getUserWallets(user);
+              } catch {
+                  // The read failed outright — offline with a cold Firestore cache, or a
+                  // transient error. Show the last known list and stop here. Falling
+                  // through to wallet creation (the old behaviour) is what produced
+                  // duplicate personal wallets.
+                  const cached = readCachedWallets();
+                  if (cached.length > 0) {
+                      setWallets(cached);
+                      setActiveWallet(cached.find(w => w.id === savedWalletId) || cached[0]);
+                      showNotification('info', 'Offline — showing wallets saved on this device');
+                  } else {
+                      showNotification('error', 'Could not load your wallets. Check your connection and reopen the app.');
+                  }
+                  return;
+              }
+
               // Cleanup duplicate personal wallets (in case they exist from previous bugs)
               // This also runs after syncGuestData, but we do it here too as a safety measure
               try {
@@ -138,9 +185,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                   // Refresh wallets after cleanup
                   userWallets = await storage.getUserWallets(user);
               } catch (error) {
-                  // Continue even if cleanup fails
+                  // Continue even if cleanup fails — userWallets still holds the pre-cleanup list
               }
-              
+
               if (userWallets.length > 0) {
                   setWallets(userWallets);
                   
@@ -156,45 +203,53 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
                       const personalWallet = userWallets.find(w => w.isPersonal);
                       setActiveWallet(personalWallet || userWallets[0]);
                   }
-} else {
-                  // Offline fallback: try localStorage cache before creating a new wallet
-                  const cached = localStorage.getItem(WALLETS_CACHE_KEY);
-                  if (cached) {
-                    try {
-                      const parsed: Wallet[] = JSON.parse(cached);
-                      if (parsed.length > 0) {
-                        setWallets(parsed);
-                        const saved = savedWalletId ? parsed.find(w => w.id === savedWalletId) : null;
-                        setActiveWallet(saved || parsed[0]);
-                        return;
+              } else {
+                  // The read succeeded and really did come back empty: a brand-new
+                  // account. Give them a wallet to start in.
+                  try {
+                      await storage.createWallet(user, 'Personal Wallet', true);
+                      const updatedWallets = await storage.getUserWallets(user);
+                      if (updatedWallets.length > 0) {
+                          setWallets(updatedWallets);
+                          setActiveWallet(updatedWallets.find(w => w.isPersonal) || updatedWallets[0]);
                       }
-                    } catch { /* ignore corrupt cache */ }
+                  } catch {
+                      showNotification('error', 'Could not set up your wallet. Check your connection and reopen the app.');
                   }
-                  // Only create default personal wallet if no wallets exist anywhere
-                  await storage.createWallet(user, 'Personal Wallet', true);
-                  const updatedWallets = await storage.getUserWallets(user);
-                  setWallets(updatedWallets);
-                  setActiveWallet(updatedWallets[0]);
-                }
+              }
           }
       };
       loadWallets();
-  }, [user]);
+  }, [user, showNotification]);
 
-  // Notification/haptic helpers — defined before the subscription effect that uses them
-  const showNotification = useCallback((type: NotificationType, message: string) => {
-    const id = Math.random().toString(36).substr(2, 9);
-    setNotifications(prev => [...prev, { id, type, message }]);
-    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 3000);
-  }, []);
-
-  const dismissNotification = useCallback((id: string) => {
-    setNotifications(prev => prev.filter(n => n.id !== id));
-  }, []);
-
-  const triggerHaptic = useCallback(() => {
-    if (navigator.vibrate) navigator.vibrate(10);
-  }, []);
+  // Re-attempt a migration that previously failed. The local copy was never deleted,
+  // so this is safe to run repeatedly; it is surfaced in Settings whenever
+  // pendingGuestExpenses is non-zero.
+  const retryGuestSync = useCallback(async () => {
+    if (!user || user.type === 'guest') return;
+    try {
+      await storage.syncGuestData(user);
+      const remaining = storage.getPendingGuestExpenseCount();
+      setPendingGuestExpenses(remaining);
+      // The backup itself has already succeeded by this point. Refreshing the wallet
+      // list is presentation only, so a failure here must not be reported as a
+      // failed backup.
+      try {
+        const refreshed = await storage.getUserWallets(user);
+        if (refreshed.length > 0) {
+          setWallets(refreshed);
+          const personal = refreshed.find(w => w.isPersonal);
+          if (personal) setActiveWallet(personal);
+        }
+      } catch {
+        // Keep the current list; the next app open will reconcile it.
+      }
+      showNotification('success', 'Your device data is now backed up');
+    } catch (e: any) {
+      setPendingGuestExpenses(storage.getPendingGuestExpenseCount());
+      showNotification('error', e?.message || 'Backup failed — your data is still on this device');
+    }
+  }, [user, showNotification]);
 
   useEffect(() => {
       if (!user || !activeWallet) {
@@ -206,6 +261,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (user.type === 'guest') {
           setExpenses(storage.getGuestExpenses());
           setIsSyncing(false);
+          // Keep this tab in step with any other tab the user has open.
+          return storage.subscribeToGuestDataChanges(() => {
+              setExpenses(storage.getGuestExpenses());
+          });
       } else {
           setIsSyncing(true);
           const hasReceivedData = { current: false };
@@ -250,81 +309,31 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     }, [expenses]);
 
-  // Check app notifications periodically
-  useEffect(() => {
-    if (!user || !activeWallet) {
-      setAppNotifications([]);
-      return;
-    }
-    
-    const checkNotifications = () => {
-      const currentDate = format(new Date(), 'yyyy-MM-dd');
-      const newNotifications = getAllNotifications(
-        expenses,
-        monthlyStats.currentMonthSpending,
-        budget,
-        user.id,
-        currentDate
-      );
-      // Respect persisted read/dismissed state
-      const visible = newNotifications
-        .filter(n => !dismissedNotificationIds.has(n.id))
-        .map(n => ({ ...n, read: readNotificationIds.has(n.id) }));
-      setAppNotifications(visible);
-    };
-    
-    // Check immediately
-    checkNotifications();
-    
-    // Check every 5 minutes
-    const interval = setInterval(checkNotifications, 5 * 60 * 1000);
-    
-    return () => clearInterval(interval);
-  }, [user, activeWallet, expenses, monthlyStats.currentMonthSpending, budget, readNotificationIds, dismissedNotificationIds]);
-  
-  const updateAppNotifications = useCallback((notifications: AppNotification[]) => {
-    // Re-apply persisted read/dismissed state when the list is replaced externally
-    const visible = notifications
-      .filter(n => !dismissedNotificationIds.has(n.id))
-      .map(n => ({ ...n, read: readNotificationIds.has(n.id) }));
-    setAppNotifications(visible);
-  }, [readNotificationIds, dismissedNotificationIds]);
-
-  const markAppNotificationRead = useCallback((id: string) => {
-    const next = new Set(readNotificationIds);
-    next.add(id);
-    persistReadIds(next);
-    setAppNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
-  }, [readNotificationIds, persistReadIds]);
-
-  const dismissAppNotification = useCallback((id: string) => {
-    const next = new Set(dismissedNotificationIds);
-    next.add(id);
-    persistDismissedIds(next);
-    setAppNotifications(prev => prev.filter(n => n.id !== id));
-  }, [dismissedNotificationIds, persistDismissedIds]);
-
-  const markAllAppNotificationsRead = useCallback(() => {
-    setAppNotifications(prev => {
-      const next = new Set(readNotificationIds);
-      prev.forEach(n => next.add(n.id));
-      persistReadIds(next);
-      return prev.map(n => ({ ...n, read: true }));
-    });
-  }, [readNotificationIds, persistReadIds]);
-
   const switchWallet = useCallback((walletId: string) => {
       const wallet = wallets.find(w => w.id === walletId);
       if (wallet) setActiveWallet(wallet);
   }, [wallets]);
 
+  // Re-reads the wallet list after a mutation. Never throws: the write it follows has
+  // already succeeded, so a failed refresh is a display problem, not a failed action —
+  // reporting it as one would tell users their wallet was not created when it was.
+  const refreshWallets = useCallback(async (): Promise<Wallet[] | null> => {
+      if (!user || user.type === 'guest') return null;
+      try {
+          const list = await storage.getUserWallets(user);
+          setWallets(list);
+          return list;
+      } catch {
+          return null;
+      }
+  }, [user]);
+
   const createNewWallet = useCallback(async (name: string, isPersonal: boolean = false) => {
       if (!user || user.type === 'guest') return;
       try {
           await storage.createWallet(user, name, isPersonal);
-          const updatedWallets = await storage.getUserWallets(user);
-          setWallets(updatedWallets);
-          const newWallet = updatedWallets.find(w => w.name === name);
+          const updatedWallets = await refreshWallets();
+          const newWallet = updatedWallets?.find(w => w.name === name);
           if (newWallet) setActiveWallet(newWallet);
           showNotification('success', 'New Wallet Created');
       } catch (e: any) {
@@ -334,14 +343,13 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               console.error('Error creating wallet:', e);
           }
       }
-  }, [user, showNotification]);
+  }, [user, showNotification, refreshWallets]);
 
   const joinWallet = useCallback(async (code: string) => {
       if (!user || user.type === 'guest') return;
       try {
           await storage.joinWalletByCode(user, code);
-          const updatedWallets = await storage.getUserWallets(user);
-          setWallets(updatedWallets);
+          await refreshWallets();
           showNotification('success', 'Joined Wallet Successfully');
       } catch (e: any) {
           const errorMsg = e?.message || 'Invalid Invite Code';
@@ -357,14 +365,14 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       if (!user || user.type === 'guest') return;
       try {
           await storage.leaveWallet(user, walletId);
-          const updatedWallets = await storage.getUserWallets(user);
-          setWallets(updatedWallets);
-          // Switch to first available wallet
-          if (updatedWallets.length > 0) {
-              setActiveWallet(updatedWallets[0]);
-          } else {
-              // Safety: If no wallets left, recreate personal wallet
-              await createNewWallet('Personal Wallet', true);
+          const updatedWallets = await refreshWallets();
+          if (updatedWallets) {
+              if (updatedWallets.length > 0) {
+                  setActiveWallet(updatedWallets[0]);
+              } else {
+                  // Safety: If no wallets left, recreate personal wallet
+                  await createNewWallet('Personal Wallet', true);
+              }
           }
           showNotification('success', 'Left Wallet');
       } catch(e: any) {
@@ -374,20 +382,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               console.error('Error leaving wallet:', e);
           }
       }
-  }, [user, createNewWallet, showNotification]);
+  }, [user, createNewWallet, showNotification, refreshWallets]);
 
   const deleteWallet = useCallback(async (walletId: string) => {
       if (!user || user.type === 'guest') return;
       try {
           await storage.deleteWallet(user, walletId);
-          const updatedWallets = await storage.getUserWallets(user);
-          setWallets(updatedWallets);
-          // Switch to first available wallet
-          if (updatedWallets.length > 0) {
-              setActiveWallet(updatedWallets[0]);
-          } else {
-              // Safety: If no wallets left, recreate personal wallet
-              await createNewWallet('Personal Wallet', true);
+          const updatedWallets = await refreshWallets();
+          if (updatedWallets) {
+              if (updatedWallets.length > 0) {
+                  setActiveWallet(updatedWallets[0]);
+              } else {
+                  // Safety: If no wallets left, recreate personal wallet
+                  await createNewWallet('Personal Wallet', true);
+              }
           }
           showNotification('success', 'Wallet Deleted');
       } catch(e: any) {
@@ -397,7 +405,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
               console.error('Error deleting wallet:', e);
           }
       }
-  }, [user, createNewWallet, showNotification]);
+  }, [user, createNewWallet, showNotification, refreshWallets]);
 
   const addExpense = useCallback(async (amount: number, category: Category, note: string, date?: Date, splitDetails?: SplitDetails) => {
     if (!user || !activeWallet) return;
@@ -421,6 +429,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (import.meta.env.DEV) {
             console.error('Error adding expense:', e);
         }
+        // Rethrow so the caller can keep its form open. Swallowing here made the add
+        // modal close on failure and discard whatever the user had typed.
+        throw e;
     }
   }, [user, activeWallet, showNotification, triggerHaptic]);
 
@@ -433,11 +444,18 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (originalExpense?.splitDetails) {
             const updatedSplitDetails = { ...originalExpense.splitDetails };
             if (updatedSplitDetails.splitType === 'equal') {
-                const perPerson = amount / updatedSplitDetails.participants.length;
-                updatedSplitDetails.participants = updatedSplitDetails.participants.map(p => ({
-                    ...p,
-                    amount: Math.round(perPerson * 100) / 100
-                }));
+                // Rounding each share independently could drift far enough from the
+                // total to fail validation — 3 people on Rs 100 gave 33.33 x 3 = 99.99,
+                // which the 0.01 tolerance rejected. Distribute the remainder instead.
+                const totalCents = Math.round(amount * 100);
+                const n = updatedSplitDetails.participants.length;
+                const baseCents = Math.floor(totalCents / n);
+                let remainder = totalCents - baseCents * n;
+                updatedSplitDetails.participants = updatedSplitDetails.participants.map(p => {
+                    const cents = baseCents + (remainder > 0 ? 1 : 0);
+                    if (remainder > 0) remainder -= 1;
+                    return { ...p, amount: cents / 100 };
+                });
             }
             updates.splitDetails = updatedSplitDetails;
         }
@@ -685,24 +703,65 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [user, activeWallet, expenses, showNotification, triggerHaptic, setExpenses]);
 
+  // Reverses a settlement recorded by the current user. Backs the Undo shown right
+  // after settling — previously that button only hid the snackbar, leaving the debt
+  // marked paid while telling the user it had been taken back.
+  const unmarkSettlement = useCallback(async (expenseId: string, fromUserId: string, toUserId: string) => {
+    if (!user || !activeWallet) return;
+    try {
+        const expense = expenses.find(e => e.id === expenseId);
+        if (!expense || !expense.splitDetails) {
+          showNotification('error', 'Expense not found or not split');
+          return;
+        }
+
+        const settlements = expense.splitDetails.settlements || [];
+        const target = settlements.find(
+          s => s.fromUserId === fromUserId && s.toUserId === toUserId && s.settledBy === user.id
+        );
+        if (!target) {
+          // Either already reversed, or recorded by somebody else — only the person
+          // who marked it paid is allowed to take it back.
+          return;
+        }
+
+        const updatedSplitDetails = {
+          ...expense.splitDetails,
+          settlements: settlements.filter(s => s !== target)
+        };
+
+        await storage.updateExpense(user, activeWallet.id, expenseId, {
+          splitDetails: updatedSplitDetails
+        });
+
+        if (user.type === 'guest') {
+          setExpenses(storage.getGuestExpenses());
+        }
+    } catch (e: any) {
+        showNotification('error', e?.message || 'Failed to undo settlement');
+        if (import.meta.env.DEV) {
+            console.error('Error reversing settlement:', e);
+        }
+        throw e;
+    }
+  }, [user, activeWallet, expenses, showNotification]);
+
   const contextValue = useMemo(() => ({
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
     expenses, budget, setBudget, monthlyStats, isSyncing,
+    pendingGuestExpenses, retryGuestSync,
     addExpense, updateExpense, deleteExpense, restoreExpense, setExpenses,
-    getMemberBalances, markSettlement,
+    getMemberBalances, markSettlement, unmarkSettlement,
     customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories,
     notifications, showNotification, dismissNotification, triggerHaptic,
-    appNotifications, updateAppNotifications,
-    markAppNotificationRead, dismissAppNotification, markAllAppNotificationsRead
   }), [
     wallets, activeWallet, switchWallet, createNewWallet, joinWallet, leaveWallet, deleteWallet,
     expenses, budget, setBudget, monthlyStats, isSyncing,
+    pendingGuestExpenses, retryGuestSync,
     addExpense, updateExpense, deleteExpense, restoreExpense,
-    getMemberBalances, markSettlement,
+    getMemberBalances, markSettlement, unmarkSettlement,
     customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories,
     notifications, showNotification, dismissNotification, triggerHaptic,
-    appNotifications, updateAppNotifications,
-    markAppNotificationRead, dismissAppNotification, markAllAppNotificationsRead
   ]);
 
   return (

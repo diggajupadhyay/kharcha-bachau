@@ -24,7 +24,7 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   onCancel
 }) => {
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, isOpen);
+  useFocusTrap(modalRef, isOpen, onCancel);
 
   if (!isOpen) return null;
 

@@ -1,8 +1,8 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
+import { useAuth } from '../context/AuthContext';
 import { Trash2, Search, X, Users } from 'lucide-react';
 import { format, subDays, startOfYear } from 'date-fns';
-import AuthModal from '../components/AuthModal';
 import EditExpenseModal from '../components/EditExpenseModal';
 import BalanceSummary from '../components/BalanceSummary';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -35,7 +35,7 @@ const monthEnd = (d: Date) => {
 
 const History: React.FC = () => {
   const { expenses, deleteExpense, restoreExpense, budget, monthlyStats, activeWallet, markSettlement, isSyncing, getAllCategories } = useStore();
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const { user } = useAuth();
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Expense | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Expense | null>(null);
@@ -186,10 +186,17 @@ const History: React.FC = () => {
   const isGroupWallet = activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1;
 
   // Delete with Undo: confirmation first, then deletion commits immediately; Undo restores
+  // restoreExpense re-creates the document with its original createdBy, and the rules
+  // only accept a create attributed to the caller. Offering Undo to anyone else would
+  // fail with "Failed to restore" every time.
+  const canUndoDelete = (item: Expense | null) =>
+    !!item && (!user || user.type === 'guest' || item.createdBy?.uid === user.id);
+
   const handleDeleteConfirm = () => {
     if (!confirmDelete) return;
-    deleteExpense(confirmDelete.id);
-    setPendingDelete(confirmDelete);
+    const target = confirmDelete;
+    deleteExpense(target.id);
+    setPendingDelete(canUndoDelete(target) ? target : null);
     setConfirmDelete(null);
   };
 
@@ -295,7 +302,7 @@ const History: React.FC = () => {
        {/* Search Input - Show when toggled */}
        {showSearch && (
            <div className="mb-3 relative">
-               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
+               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" size={18} />
                <input 
                    type="text" 
                    placeholder="Search expenses" 
@@ -306,7 +313,7 @@ const History: React.FC = () => {
                />
                <button
                    onClick={() => { setShowSearch(false); setSearchTerm(''); }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-400 active:scale-95 hover:text-slate-700 transition-colors"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-slate-500 active:scale-95 hover:text-slate-700 transition-colors"
                >
                    <X size={18} />
                </button>
@@ -333,16 +340,21 @@ const History: React.FC = () => {
                    
                    <div className="space-y-1.5">
                        {grouped[dateStr].map((item) => {
+                           // A div[role=button] wrapping a real <button> is nested
+                           // interactive content: invalid, and ambiguous to assistive
+                           // tech about what activating the row does. The row is now a
+                           // button sitting beside the delete button.
                            return (
-                                <div 
-                                   key={item.id} 
-                                   onClick={() => setEditingExpense(item)}
-                                   role="button"
-                                   tabIndex={0}
-                                   aria-label={`${item.categoryName} ${currencySymbol} ${item.amount}`}
-                                    onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setEditingExpense(item); } }}
-                                     className="bg-white p-3 md:p-4 lg:p-5 rounded-xl border border-slate-300 flex items-center gap-3 md:gap-4 lg:gap-5 active:scale-95 cursor-pointer select-none hover:shadow-md transition-shadow focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                                <div
+                                   key={item.id}
+                                   className="bg-white rounded-xl border border-slate-300 flex items-stretch hover:shadow-md transition-shadow"
                                 >
+                                  <button
+                                    type="button"
+                                    onClick={() => setEditingExpense(item)}
+                                    aria-label={`Edit ${item.categoryName}, ${currencySymbol} ${item.amount}`}
+                                    className="flex-1 min-w-0 flex items-center gap-3 md:gap-4 lg:gap-5 p-3 md:p-4 lg:p-5 text-left active:scale-[0.99] cursor-pointer select-none rounded-l-xl focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-inset"
+                                  >
                                      <div className={`w-10 h-10 md:w-12 md:h-12 lg:w-14 lg:h-14 rounded-lg flex items-center justify-center text-xl md:text-2xl lg:text-3xl flex-shrink-0 relative ${parseCategoryColor(categoryColorMap[item.categoryId]).bg}`}>
                                        {(() => {
                                          const Icon = getCategoryIcon(item.categoryId);
@@ -360,7 +372,7 @@ const History: React.FC = () => {
                                             <div className="flex items-center gap-1.5 flex-1 min-w-0">
                                                 <h4 className="text-sm md:text-base lg:text-lg font-semibold text-slate-900 truncate">{item.categoryName}</h4>
                                                 {item.splitDetails && (
-                                                  <span className="text-[10px] md:text-xs lg:text-sm font-medium text-emerald-600 bg-emerald-50 px-1.5 md:px-2 lg:px-2.5 py-0.5 md:py-1 rounded flex-shrink-0">
+                                                  <span className="text-[11px] md:text-xs lg:text-sm font-medium text-emerald-600 bg-emerald-50 px-1.5 md:px-2 lg:px-2.5 py-0.5 md:py-1 rounded flex-shrink-0">
                                                     Split
                                                   </span>
                                                 )}
@@ -373,22 +385,24 @@ const History: React.FC = () => {
                                         <p className="text-xs text-slate-700 truncate">{item.note}</p>
                                     )}
                                    {item.splitDetails && (
-                                       <p className="text-[10px] text-slate-400 mt-0.5">
+                                       <p className="text-[11px] text-slate-500 mt-0.5">
                                          Paid by {item.splitDetails.participants.find(p => p.userId === item.splitDetails?.paidBy)?.userName || 'Unknown'} • 
                                          Split among {item.splitDetails.participants.length} {item.splitDetails.participants.length === 1 ? 'person' : 'people'}
                                        </p>
                                    )}
                                    {isGroupWallet && item.createdBy?.name && !item.splitDetails && (
-                                       <p className="text-[10px] text-slate-400 mt-0.5">Added by {item.createdBy.name}</p>
+                                       <p className="text-[11px] text-slate-500 mt-0.5">Added by {item.createdBy.name}</p>
                                    )}
                                </div>
-                                <button 
-                                    onClick={(e) => { e.stopPropagation(); handleDeleteClick(item); }}
-                                     className="min-w-[44px] min-h-[44px] text-slate-400 active:scale-95 flex-shrink-0 flex items-center justify-center hover:text-rose-600 hover:bg-rose-50 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500"
-                                    aria-label={`Delete ${item.categoryName}`}
-                                 >
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteClick(item)}
+                                    className="min-w-[48px] text-slate-500 active:scale-95 flex-shrink-0 flex items-center justify-center hover:text-rose-600 hover:bg-rose-50 transition-colors rounded-r-xl border-l border-slate-100 focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-inset"
+                                    aria-label={`Delete ${item.categoryName}, ${currencySymbol} ${item.amount}`}
+                                  >
                                      <Trash2 size={18} />
-                                 </button>
+                                  </button>
                            </div>
                            );
                        })}
@@ -408,7 +422,7 @@ const History: React.FC = () => {
         ) : (
           <div className="text-center py-12 flex flex-col items-center">
             <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mb-4">
-                 <Search size={32} className="text-slate-400" />
+                 <Search size={32} className="text-slate-500" />
             </div>
             {expenses.length === 0 ? (
               <>
@@ -440,9 +454,6 @@ const History: React.FC = () => {
             </button>
           </div>
         )}
-
-
-<AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
         <EditExpenseModal 
           expense={editingExpense}
           isOpen={!!editingExpense}
@@ -451,7 +462,9 @@ const History: React.FC = () => {
         <ConfirmDialog
           isOpen={!!confirmDelete}
           title="Delete Expense"
-          message="Delete this expense? This cannot be undone."
+          message={canUndoDelete(confirmDelete)
+            ? 'Remove this expense? You will have a few seconds to undo it.'
+            : 'Remove this expense? Somebody else added it, so this cannot be undone.'}
           confirmLabel="Delete"
           destructive
           onConfirm={handleDeleteConfirm}

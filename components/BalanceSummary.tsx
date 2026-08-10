@@ -2,6 +2,7 @@ import React, { useMemo, useCallback, useState, useEffect } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
+import { buildMemberNameMap, memberNameFrom } from '../utils/memberNames';
 import { Users, Check, Loader2 } from 'lucide-react';
 
 interface BalanceSummaryProps {
@@ -9,31 +10,26 @@ interface BalanceSummaryProps {
 }
 
 const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
-  const { activeWallet, expenses, getMemberBalances } = useStore();
+  const { activeWallet, expenses, getMemberBalances, unmarkSettlement } = useStore();
   const { user } = useAuth();
 
   const currencySymbol = getCurrencySymbol();
 
   const [settlingKey, setSettlingKey] = useState<string | null>(null);
+  const [isUndoing, setIsUndoing] = useState(false);
   const [pendingSettled, setPendingSettled] = useState<{ from: string; to: string; amount: number; expenseIds: string[] } | null>(null);
 
   const balances = useMemo(() => getMemberBalances(), [getMemberBalances]);
   
-  // Memoize member names to avoid repeated lookups
-  const memberNames = useMemo(() => {
-    const names: Record<string, string> = {};
-    if (user) names[user.id] = user.name;
-    expenses.forEach(e => {
-      if (e.createdBy?.uid && !names[e.createdBy.uid]) {
-        names[e.createdBy.uid] = e.createdBy.name;
-      }
-    });
-    return names;
-  }, [user, expenses]);
+  const memberNames = useMemo(
+    () => buildMemberNameMap(activeWallet, expenses, user?.id, user?.name),
+    [activeWallet, expenses, user]
+  );
 
-  const getMemberName = useCallback((userId: string): string => {
-    return memberNames[userId] || `Member ${userId.substring(0, 4)}`;
-  }, [memberNames]);
+  const getMemberName = useCallback(
+    (userId: string): string => memberNameFrom(memberNames, userId),
+    [memberNames]
+  );
   
   // Calculate who owes whom (only unsettled debts)
   const debts = useMemo(() => {
@@ -85,6 +81,22 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
       setSettlingKey(null);
     }
   }, [onSettle]);
+
+  const handleUndoSettle = useCallback(async () => {
+    if (!pendingSettled || isUndoing) return;
+    setIsUndoing(true);
+    try {
+      for (const id of pendingSettled.expenseIds) {
+        await unmarkSettlement(id, pendingSettled.from, pendingSettled.to);
+      }
+      setPendingSettled(null);
+    } catch {
+      // unmarkSettlement already surfaced the error; keep the snackbar so the user
+      // can see the undo did not take effect and try again.
+    } finally {
+      setIsUndoing(false);
+    }
+  }, [pendingSettled, isUndoing, unmarkSettlement]);
 
   // Auto-dismiss the snackbar after 7 seconds
   useEffect(() => {
@@ -175,7 +187,7 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
                       <p className="text-xs md:text-sm text-emerald-600 mt-1 md:mt-2">You will receive this</p>
                     )}
                   </div>
-                  {onSettle && isYouOwing && (
+                  {onSettle && (isYouOwing || isOwedToYou) && (
                     <button
                       onClick={() => handleSettle(debt)}
                       disabled={settlingKey === `${debt.from}-${debt.to}`}
@@ -186,7 +198,11 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
                       ) : (
                         <Check size={14} className="md:w-4 md:h-4 lg:w-5 lg:h-5" />
                       )}
-                      <span>{settlingKey === `${debt.from}-${debt.to}` ? 'Settling…' : 'Settle'}</span>
+                      <span>
+                        {settlingKey === `${debt.from}-${debt.to}`
+                          ? 'Saving…'
+                          : isYouOwing ? 'I paid this' : 'They paid me'}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -209,10 +225,11 @@ const BalanceSummary: React.FC<BalanceSummaryProps> = ({ onSettle }) => {
         >
           <span className="text-sm">Settled</span>
           <button
-            onClick={() => setPendingSettled(null)}
-            className="text-sm font-semibold text-emerald-400 active:scale-95 min-h-[36px] px-2 hover:text-emerald-300 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+            onClick={handleUndoSettle}
+            disabled={isUndoing}
+            className="text-sm font-semibold text-emerald-400 active:scale-95 min-h-[36px] px-2 hover:text-emerald-300 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 disabled:opacity-60 disabled:active:scale-100"
           >
-            Undo
+            {isUndoing ? 'Undoing…' : 'Undo'}
           </button>
         </div>
       )}

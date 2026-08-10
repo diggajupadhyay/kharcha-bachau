@@ -3,20 +3,20 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
-import { LogOut, User, Cloud, Wallet, Download, ChevronRight, Share2, Trash2, Tag, Upload, Database, Settings } from 'lucide-react';
+import { LogOut, User, Cloud, Wallet, Download, ChevronRight, Share2, Trash2, Tag, Upload, Database, Settings, AlertTriangle } from 'lucide-react';
 import WalletSelector from '../components/WalletSelector';
 import CategoryManager from '../components/CategoryManager';
-import AuthModal from '../components/AuthModal';
 import ConfirmDialog from '../components/ConfirmDialog';
 import * as storage from '../services/storageService';
 import { generateCSVExport } from '../services/csvService';
-import { exportBackup, importBackup, previewBackup, mergeBackupData } from '../services/backupService';
+import { exportBackup, importBackup, previewBackup, mergeBackupData, sanitizeBackupExpenses } from '../services/backupService';
 
 const SettingsPage: React.FC = () => {
   const navigate = useNavigate();
-  const { budget, setBudget, expenses, activeWallet, leaveWallet, deleteWallet, showNotification, setExpenses, wallets, customCategories, triggerHaptic } = useStore();
+  const { budget, setBudget, expenses, activeWallet, leaveWallet, deleteWallet, showNotification, setExpenses, wallets, customCategories, triggerHaptic, pendingGuestExpenses, retryGuestSync } = useStore();
   const { user, logout, signInWithGoogle, deleteAccount } = useAuth();
-  const [isAuthOpen, setIsAuthOpen] = useState(false);
+  const [isRetryingSync, setIsRetryingSync] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
   const [isWalletSelectorOpen, setIsWalletSelectorOpen] = useState(false);
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
@@ -28,11 +28,18 @@ const SettingsPage: React.FC = () => {
     title: string;
     message: string;
     destructive?: boolean;
+    confirmLabel?: string;
     onConfirm: () => void;
-  }>({ open: false, title: '', message: '', destructive: false, onConfirm: () => {} });
+  }>({ open: false, title: '', message: '', destructive: false, confirmLabel: 'Confirm', onConfirm: () => {} });
 
-  const requestConfirm = (title: string, message: string, onConfirm: () => void, destructive = false) => {
-    setConfirmDialog({ open: true, title, message, destructive, onConfirm });
+  const requestConfirm = (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    destructive = false,
+    confirmLabel = 'Confirm'
+  ) => {
+    setConfirmDialog({ open: true, title, message, destructive, onConfirm, confirmLabel });
   };
 
   useEffect(() => {
@@ -118,29 +125,74 @@ const SettingsPage: React.FC = () => {
   };
 
   const handleImportConfirmed = async () => {
-    if (!selectedImportFile) return;
+    if (!selectedImportFile || !user || !activeWallet) return;
+    setIsImporting(true);
     try {
       const backup = await importBackup(selectedImportFile);
-      const targetExpenses = mergeBackupData(expenses, wallets, customCategories, backup).expenses;
-      const result = await storage.bulkImportExpenses(user!, targetExpenses);
-      if (user?.type === 'guest') {
-        setExpenses(targetExpenses);
+
+      // Drop unusable rows before anything is written. Nothing validates local
+      // storage, so a malformed date here would be persisted and then crash the
+      // History screen on every load.
+      const { valid, rejected } = sanitizeBackupExpenses(backup.data.expenses);
+      if (valid.length === 0) {
+        showNotification('error', 'No usable expenses found in that file');
+        setIsImporting(false);
+        return;
       }
-      showNotification('success', `Imported ${result.imported} expenses${result.skipped > 0 ? ` (${result.skipped} skipped)` : ''}`);
+      const cleanBackup = { ...backup, data: { ...backup.data, expenses: valid } };
+      const merged = mergeBackupData(expenses, wallets, customCategories, cleanBackup).expenses;
+      if (rejected > 0) {
+        showNotification('info', `${rejected} damaged ${rejected === 1 ? 'entry was' : 'entries were'} skipped`);
+      }
+
+      if (user.type === 'guest') {
+        // Local store is a single array — persist the whole merged list.
+        storage.replaceGuestExpenses(merged);
+        setExpenses(merged);
+        showNotification('success', `Restored ${merged.length - expenses.length} expenses`);
+      } else {
+        // Only send rows that are not already in this wallet, and let the data layer
+        // retarget them — the walletId inside the file may not exist in this account.
+        const existingIds = new Set(expenses.map(e => e.id));
+        const incoming = merged.filter(e => !existingIds.has(e.id));
+        const result = await storage.importExpensesToWallet(user, incoming, activeWallet.id);
+        showNotification(
+          result.skipped > 0
+            ? 'info'
+            : 'success',
+          result.skipped > 0
+            ? `Restored ${result.imported} into "${activeWallet.name}" — ${result.skipped} could not be read`
+            : `Restored ${result.imported} expenses into "${activeWallet.name}"`
+        );
+      }
+
       setShowImportDialog(false);
       setBackupPreview(null);
       setSelectedImportFile(null);
       triggerHaptic();
     } catch (error: any) {
       showNotification('error', error.message || 'Failed to import backup');
+    } finally {
+      setIsImporting(false);
     }
+  };
+
+  const handleSignOut = () => {
+    requestConfirm(
+      'Sign out',
+      'Your expenses stay safe in your account. Sign in again any time to see them. ' +
+      'This device will go back to guest mode, which starts empty.',
+      async () => { await logout(); },
+      false,
+      'Sign out'
+    );
   };
 
   const handleClearData = () => {
     if (!activeWallet || !user) return;
     requestConfirm(
       'Clear All Data',
-      `Clear all expenses in "${activeWallet.name}"? This cannot be undone.`,
+      `Every expense in "${activeWallet.name}" will be permanently removed. The wallet itself stays. This cannot be undone.`,
       async () => {
         try {
           await storage.clearAllExpenses(user, activeWallet.id);
@@ -150,7 +202,8 @@ const SettingsPage: React.FC = () => {
           showNotification('error', error.message || 'Failed to clear expenses');
         }
       },
-      true
+      true,
+      'Delete everything'
     );
   };
 
@@ -160,11 +213,14 @@ const SettingsPage: React.FC = () => {
     if (isOwner) {
       requestConfirm(
         'Delete Wallet',
-        `Permanently delete "${activeWallet.name}"? This cannot be undone.`,
+        activeWallet.members.length > 1
+          ? `"${activeWallet.name}" and every expense in it will be deleted for all ${activeWallet.members.length} members, not just you. This cannot be undone.`
+          : `"${activeWallet.name}" and every expense in it will be permanently deleted. This cannot be undone.`,
         async () => {
           await deleteWallet(activeWallet.id);
         },
-        true
+        true,
+        'Delete wallet'
       );
     } else {
       requestConfirm(
@@ -173,7 +229,8 @@ const SettingsPage: React.FC = () => {
         async () => {
           await leaveWallet(activeWallet.id);
         },
-        true
+        false,
+        'Leave wallet'
       );
     }
   };
@@ -193,7 +250,8 @@ const SettingsPage: React.FC = () => {
           showNotification('error', error.message || 'Failed to delete account');
         }
       },
-      true
+      true,
+      user.type === 'user' ? 'Delete my account' : 'Clear this device'
     );
   };
 
@@ -240,18 +298,58 @@ const SettingsPage: React.FC = () => {
                   <p className="text-[11px] text-slate-700 truncate">{user?.type === 'guest' ? 'Data stored on device' : user?.email}</p>
                 </div>
                 {user?.type === 'user' && (
-                  <button onClick={() => { logout(); }} className="min-w-[44px] min-h-[44px] text-rose-600 bg-rose-50 rounded-xl font-medium active:scale-95 flex items-center justify-center hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
-                    <LogOut size={20} />
+                  <button
+                    onClick={handleSignOut}
+                    aria-label="Sign out"
+                    className="min-h-[44px] px-3 text-slate-700 bg-slate-100 rounded-xl text-xs font-semibold active:scale-95 flex items-center gap-1.5 hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                  >
+                    <LogOut size={16} />
+                    <span>Sign out</span>
                   </button>
                 )}
               </div>
               {user?.type === 'guest' && (
-                <button onClick={handleBackupToCloud} className="w-full min-h-[48px] bg-slate-900 text-white rounded-xl shadow-md text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
-                  <Cloud size={20} />
-                  <span>Back up Data to Cloud</span>
-                </button>
+                <>
+                  <div className="bg-amber-50 border border-amber-300 rounded-xl p-3.5 flex items-start gap-3">
+                    <AlertTriangle size={18} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                    <p className="text-[11px] text-amber-900 leading-relaxed">
+                      Your expenses are saved <span className="font-bold">only on this phone</span>.
+                      If you clear your browser, lose this device, or reinstall, they are gone.
+                      Signing in keeps a copy safe and lets you see them on any device.
+                    </p>
+                  </div>
+                  <button onClick={handleBackupToCloud} className="w-full min-h-[48px] bg-slate-900 text-white rounded-xl shadow-md text-sm font-semibold flex items-center justify-center gap-2 active:scale-95 hover:bg-slate-800 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+                    <Cloud size={20} />
+                    <span>Keep my data safe</span>
+                  </button>
+                </>
               )}
             </div>
+
+            {/* Unfinished migration — expenses are on this device but not in the account */}
+            {user?.type === 'user' && pendingGuestExpenses > 0 && (
+              <div className="bg-amber-50 border border-amber-300 p-4 md:p-5 rounded-xl">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={20} className="text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-amber-900">
+                      {pendingGuestExpenses} expense{pendingGuestExpenses === 1 ? '' : 's'} not backed up
+                    </p>
+                    <p className="text-[11px] text-amber-800 mt-0.5 leading-relaxed">
+                      These are saved on this phone but not in your account yet, so they will not
+                      show up on your other devices. They are still safe here.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={async () => { setIsRetryingSync(true); try { await retryGuestSync(); } finally { setIsRetryingSync(false); } }}
+                  disabled={isRetryingSync}
+                  className="w-full mt-3 min-h-[44px] bg-amber-600 text-white rounded-xl text-sm font-semibold active:scale-95 hover:bg-amber-700 transition-colors disabled:opacity-60 disabled:active:scale-100 focus-visible:ring-2 focus-visible:ring-amber-500 focus-visible:ring-offset-2"
+                >
+                  {isRetryingSync ? 'Backing up…' : 'Back these up now'}
+                </button>
+              </div>
+            )}
 
             {/* Invite Code */}
             {inviteCode && !activeWallet?.isPersonal && (
@@ -289,7 +387,7 @@ const SettingsPage: React.FC = () => {
                     <p className="text-[11px] text-slate-700">{activeWallet?.name || 'Personal'}</p>
                   </div>
                 </div>
-                <ChevronRight size={20} className="text-slate-400" />
+                <ChevronRight size={20} className="text-slate-500" />
               </button>
 
               <button onClick={() => { setIsCategoryManagerOpen(true); }} className="w-full min-h-[52px] bg-white border border-slate-300 rounded-xl px-4 flex items-center justify-between active:scale-[0.98] hover:bg-slate-50 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
@@ -300,7 +398,7 @@ const SettingsPage: React.FC = () => {
                     <p className="text-[11px] text-slate-700">Customize categories</p>
                   </div>
                 </div>
-                <ChevronRight size={20} className="text-slate-400" />
+                <ChevronRight size={20} className="text-slate-500" />
               </button>
 
               <div className="pt-1">
@@ -317,41 +415,48 @@ const SettingsPage: React.FC = () => {
           <div className="space-y-4">
             {/* Export / Backup */}
             <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300 space-y-3">
-              <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Download & Backup</h3>
+              <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Download &amp; Backup</h3>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                A backup file is a copy of your expenses you can save somewhere safe and
+                load back later. The spreadsheet is for opening in Excel or Google Sheets.
+              </p>
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={handleCSV} className="min-h-[48px] bg-white border border-slate-300 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Download size={20} />
-                  <span className="text-xs">Download Report</span>
+                  <span className="text-[11px] leading-tight text-center">Spreadsheet<br/>(CSV)</span>
                 </button>
                 <button onClick={handleExportBackup} className="min-h-[48px] bg-white border border-slate-300 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Database size={20} />
-                  <span className="text-xs">Save Data</span>
+                  <span className="text-[11px] leading-tight text-center">Save backup<br/>file</span>
                 </button>
                 <button onClick={() => { setShowImportDialog(true); setBackupPreview(null); }} className="min-h-[48px] bg-white border border-slate-300 text-slate-700 rounded-xl font-medium active:scale-95 flex flex-col items-center justify-center gap-1 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
                   <Upload size={20} />
-                  <span className="text-xs">Restore Data</span>
+                  <span className="text-[11px] leading-tight text-center">Restore from<br/>file</span>
                 </button>
               </div>
             </div>
 
             {/* Danger Zone */}
             <div className="bg-white p-4 md:p-5 lg:p-6 rounded-xl border border-slate-300 space-y-3">
-              <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Data</h3>
+              <h3 className="text-xs font-semibold text-slate-900 uppercase tracking-wider">Danger Zone</h3>
+              <p className="text-[11px] text-slate-600 leading-relaxed">
+                These permanently remove data. Save a backup file first if you are unsure.
+              </p>
               {activeWallet && (
                 <button onClick={handleClearData} className="w-full min-h-[48px] bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
-                  <Trash2 size={20} />
-                  <span>Clear All Data</span>
+                  <Trash2 size={20} className="flex-shrink-0" />
+                  <span className="text-left leading-tight">Delete all expenses<br/><span className="font-normal text-[11px] opacity-80">Keeps the wallet, removes what is in it</span></span>
                 </button>
               )}
               {isSharedWallet && (
-                <button onClick={handleLeaveOrDelete} className="w-full min-h-[48px] bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
-                  <Trash2 size={20} />
-                  <span>{activeWallet?.ownerId === user?.id ? 'Delete Wallet' : 'Leave Wallet'}</span>
+                <button onClick={handleLeaveOrDelete} className={`w-full min-h-[48px] ${activeWallet?.ownerId === user?.id ? 'bg-rose-50 border-rose-200 text-rose-700' : 'bg-white border-slate-300 text-slate-700'} border rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2`}>
+                  <Trash2 size={20} className="flex-shrink-0" />
+                  <span className="text-left leading-tight">{activeWallet?.ownerId === user?.id ? 'Delete this wallet' : 'Leave this wallet'}<br/><span className="font-normal text-[11px] opacity-80">{activeWallet?.ownerId === user?.id ? 'Removes it for everyone in it' : 'You can rejoin with the code'}</span></span>
                 </button>
               )}
               <button onClick={handleDeleteAccount} className="w-full min-h-[48px] bg-rose-50 border border-rose-200 text-rose-700 rounded-xl text-sm font-medium flex items-center justify-center gap-2 active:scale-95 hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2">
-                <Trash2 size={20} />
-                <span>{user?.type === 'user' ? 'Delete Account' : 'Clear Local Data'}</span>
+                <Trash2 size={20} className="flex-shrink-0" />
+                <span className="text-left leading-tight">{user?.type === 'user' ? 'Delete my account' : 'Clear this device'}<br/><span className="font-normal text-[11px] opacity-80">{user?.type === 'user' ? 'Removes everything, everywhere' : 'Removes everything saved here'}</span></span>
               </button>
             </div>
           </div>
@@ -359,7 +464,7 @@ const SettingsPage: React.FC = () => {
 
         {/* Version */}
         <div className="text-center py-6 space-y-2">
-          <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Kharcha Bachau v0.5-beta</p>
+          <p className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Kharcha Bachau v{__APP_VERSION__}</p>
           <button
             onClick={() => { navigate('/privacy'); }}
             className="text-[11px] text-emerald-600 underline underline-offset-2 hover:text-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 rounded"
@@ -383,10 +488,20 @@ const SettingsPage: React.FC = () => {
                     <p><span className="font-medium">Wallets:</span> {backupPreview.walletCount}</p>
                     <p><span className="font-medium">Budget:</span> {getCurrencySymbol()} {backupPreview.budget.toLocaleString()}</p>
                     <p><span className="font-medium">Categories:</span> {backupPreview.customCategoryCount}</p>
+                    {backupPreview.rejectedCount > 0 && (
+                      <p className="text-amber-700">
+                        <span className="font-medium">Damaged:</span> {backupPreview.rejectedCount} entr
+                        {backupPreview.rejectedCount === 1 ? 'y' : 'ies'} will be skipped
+                      </p>
+                    )}
                   </div>
+                  <p className="text-xs text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-2.5 mb-4 leading-relaxed">
+                    These will be added to <span className="font-semibold text-slate-900">{activeWallet?.name}</span>.
+                    Nothing already saved there will be removed.
+                  </p>
                   <div className="flex gap-2">
-                    <button onClick={() => { setShowImportDialog(false); setBackupPreview(null); setSelectedImportFile(null); }} className="flex-1 min-h-[44px] bg-slate-100 text-slate-700 rounded-xl font-medium active:scale-95 hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Cancel</button>
-                    <button onClick={handleImportConfirmed} className="flex-1 min-h-[44px] bg-emerald-600 text-white rounded-xl shadow-md font-semibold active:scale-95 hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Import</button>
+                    <button onClick={() => { setShowImportDialog(false); setBackupPreview(null); setSelectedImportFile(null); }} disabled={isImporting} className="flex-1 min-h-[44px] bg-slate-100 text-slate-700 rounded-xl font-medium active:scale-95 hover:bg-slate-200 transition-colors disabled:opacity-60 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">Cancel</button>
+                    <button onClick={handleImportConfirmed} disabled={isImporting} className="flex-1 min-h-[44px] bg-emerald-600 text-white rounded-xl shadow-md font-semibold active:scale-95 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:active:scale-100 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">{isImporting ? 'Restoring…' : 'Restore'}</button>
                   </div>
                 </>
               ) : (
@@ -405,8 +520,6 @@ const SettingsPage: React.FC = () => {
           </div>
         )}
       </div>
-
-      <AuthModal isOpen={isAuthOpen} onClose={() => setIsAuthOpen(false)} />
       <WalletSelector isOpen={isWalletSelectorOpen} onClose={() => setIsWalletSelectorOpen(false)} />
       <CategoryManager isOpen={isCategoryManagerOpen} onClose={() => setIsCategoryManagerOpen(false)} />
 
@@ -415,7 +528,7 @@ const SettingsPage: React.FC = () => {
         title={confirmDialog.title}
         message={confirmDialog.message}
         destructive={confirmDialog.destructive}
-        confirmLabel="Confirm"
+        confirmLabel={confirmDialog.confirmLabel || 'Confirm'}
         cancelLabel="Cancel"
         onConfirm={() => { setConfirmDialog(c => ({ ...c, open: false })); confirmDialog.onConfirm(); }}
         onCancel={() => setConfirmDialog(c => ({ ...c, open: false }))}

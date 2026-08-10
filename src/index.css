@@ -126,6 +126,19 @@ input[type='number']::-webkit-outer-spin-button {
   to { transform: scale(1); opacity: 1; }
 }
 
+/* Honour the OS "reduce motion" setting. All four animations below run on every
+   modal open, which is exactly the kind of movement that setting exists to stop. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
 /* Responsive font-size clamp utility */
 .text-clamp-sm { font-size: clamp(0.75rem, 2.5vw, 0.875rem); }
 .text-clamp-base { font-size: clamp(0.875rem, 3vw, 1rem); }

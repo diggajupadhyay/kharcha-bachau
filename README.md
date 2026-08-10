@@ -1,542 +1,307 @@
-# Kharcha Bachau v0.4-beta — Smart Expense Tracker 🇳🇵
+# Kharcha Bachau — Expense Tracker 🇳🇵
 
-**Kharcha Bachau** (खर्च बचाउ — "Save Expenses" in Nepali) is a **Progressive Web App** for daily expense tracking, purpose-built for Nepal. It works offline-first, supports multi-wallet groups, expense splitting, and cloud sync via Firebase.
+**Kharcha Bachau** (खर्च बचाउ — "save expenses" in Nepali) is a Progressive Web App for
+daily expense tracking, built for Nepal. It works offline, stores data on your device by
+default, and can optionally sync to the cloud and be shared with a household or travel
+group.
 
-| Status | Stack | License |
+| Status | Stack | Version |
 |--------|-------|---------|
-| Public Beta | React 18 + TypeScript + Tailwind v4 | Free |
+| Beta | React 18 + TypeScript + Tailwind v4 + Firebase | see `package.json` |
 
 ---
 
-## Table of Contents
+## Contents
 
-- [Features](#-features)
-- [Screenshots / Pages](#-screenshots--pages)
-- [Architecture](#-architecture)
-- [Tech Stack](#-tech-stack)
-- [Quick Start](#-quick-start)
-- [Deployment Guide](#-deployment-guide-firebase-hosting)
-- [Development Guide](#-development-guide)
-- [Project Structure](#-project-structure)
-- [State Management](#-state-management)
-- [Data Flow](#-data-flow)
-- [Key Design Decisions](#-key-design-decisions)
-- [Testing](#-testing)
-- [Troubleshooting](#-troubleshooting)
-- [Known Issues](#-known-issues)
+- [What it does](#what-it-does)
+- [Architecture](#architecture)
+- [Security model](#security-model)
+- [Quick start](#quick-start)
+- [Deployment](#deployment)
+- [Project structure](#project-structure)
+- [State management](#state-management)
+- [Data model](#data-model)
+- [Testing](#testing)
+- [Known gaps](#known-gaps)
 
 ---
 
-## 🚀 Features
+## What it does
 
 ### Core
-- **Offline-First (Guest Mode):** All data persisted to `localStorage`. No account required.
-- **Cloud Sync:** Optional Google sign-in syncs data via Firestore across devices.
-- **Guest → Cloud Migration:** One-click backup migrates all local expenses to a Firestore personal wallet.
+- **Works without an account.** Expenses are written to `localStorage`. No sign-up.
+- **Optional cloud sync.** Google sign-in migrates local expenses into a Firestore
+  personal wallet and keeps them in sync across devices.
+- **Offline-capable.** Workbox precaches the app shell; Firestore keeps a persistent
+  IndexedDB cache for signed-in users.
 
-### Expense Tracking
-- **Category Grid** — 9 defaults (Food, Transport, Shopping, Bills, Health, Education, Fun, Rent, Other) + unlimited custom categories with emoji/color
-- **Virtual Numeric Keypad** — custom on-screen keypad with haptic feedback, decimal support, 9-digit cap
-- **Quick Add** — FAB button opens category picker → directly opens add form
-- **Tags** — up to 5 per expense, auto-suggest from existing tags, 20-char max
-- **Transport Details** — from/to location + passenger count (only for Transport category)
-- **Date Picker** — today/yesterday/custom date per expense
+### Expense tracking
+- Category grid — 9 defaults, plus custom categories with an emoji
+- On-screen numeric keypad (9-digit cap, 2 decimal places)
+- Quick Add via the floating action button, with category search
+- Per-expense date, capped at today
+- Free-text note (500 characters)
 
 ### Wallets
-- **Multi-Wallet** — separate expense streams (e.g. "Home", "Trip", "Office")
-- **Personal Wallets** — single-user, no sharing
-- **Group Wallets** — invite-code-based sharing for roommates/travel groups
-- **Wallet Switching** — instant switch between wallets via bottom-sheet selector
+- **Personal wallets** — single user, cannot be shared
+- **Shared wallets** — joined with a 6-character invite code
+- Instant switching via the wallet selector
 
-### Expense Splitting
-- **Equal Split** — divides total evenly among selected members
-- **Percentage Split** — custom percentages per member (must sum to 100%)
-- **Custom Split** — arbitrary per-person amounts (must sum to total)
-- **Who Paid** — designate which member paid
-- **Settlement Tracking** — mark debts as settled, track unpaid amounts
-- **Smart Recalculation** — editing amount of a split expense auto-recalculates equal/percentage shares
+### Splitting (shared wallets only)
+- Equal split between selected members
+- "Who paid" selection
+- Balance summary showing who owes whom
+- Settle a debt, and undo a settlement you recorded
 
-### Budgeting
-- **Monthly Budget** — per-wallet configurable limit
-- **Progress Bar** — visual indicator with color change at over-budget
-- **Over-Budget Alert** — shows exact overshoot amount
-- **Month-over-Month Comparison** — percentage change vs. previous month
+### Budget
+- Per-wallet monthly limit, synced to the wallet document
+- Progress bar on the History screen
 
-### History & Filtering
-- **Grouped by Date** — expenses shown under "Today", "Yesterday", or date headers
-- **Search** — by note, category name, amount, or tags
-- **Quick Date Filters** — Today, Yesterday, Month, All
-- **Advanced Filter Modal** — date range (presets + custom), category, tags, amount range
-- **Pagination** — loads 50 at a time with "Show more"
-- **Delete with Undo** — 7-second undo window after deletion
-- **Inline Edit** — tap any expense to edit amount, note, tags, transport details
+### History
+- Grouped by date, with Today / Yesterday headers
+- Search by note, category or amount
+- Quick filters: Today, Yesterday, Month, All
+- Paginated 50 at a time
+- Delete with a 7-second undo
+- Tap any row to edit its amount or note
 
-### Data Export
-- **PDF Report** — styled report with summary + table via jsPDF
-- **CSV Export** — UTF-8 BOM for Excel compatibility
-- **Full JSON Backup** — export all data (expenses, wallets, budget, categories)
-- **Import Backup** — replace or merge existing data, with preview
-
-### Notifications
-- **Budget Alerts** — warning at 80%, critical at 90%, exceeded at 100%
-- **Settlement Reminders** — unpaid debt reminders
-- **Daily Reminder** — nudge at 6 PM if no expense logged today
-- **Notification Preferences** — toggle each type independently
-
-### PWA
-- **Install Prompt** — Android (beforeinstallprompt) + iOS Safari guidance
-- **Service Worker** — cache-first strategies for assets, offline support
-- **Responsive** — mobile-first with desktop breakpoints up to 2xl
-- **Safe Area Insets** — full notch/status bar support on modern devices
+### Data portability
+- CSV export
+- Full JSON backup and restore, with per-row validation on import
 
 ---
 
-## 📱 Screenshots / Pages
+## Architecture
+
+**There is no backend.** This is a client-side SPA talking directly to Firebase. All
+authorization and validation lives in `firestorerules.txt`.
+
+```
+index.tsx → App.tsx → BrowserRouter → ErrorBoundary
+                                       └── AuthProvider      (Firebase Auth + guest identity)
+                                            └── StoreProvider (wallets, expenses, budget, toasts)
+                                                 └── AppContent
+                                                      ├── InstallPrompt / OfflineBanner
+                                                      ├── ToastContainer / UpdatePrompt
+                                                      ├── <Routes>
+                                                      └── Fixed footer nav + FAB
+```
 
 | Route | Component | Purpose |
 |-------|-----------|---------|
-| `/` | `Tracker` | Daily/monthly overview, category grid, budget bar |
-| `/history` | `History` | Filterable expense list, search, delete/undo, settlement summary |
-| `/settings` | `SettingsPage` | Account, wallets, categories, budget, export/backup, danger zone |
+| `/` | `Tracker` | Category grid, month/today totals, balance summary |
+| `/history` | `History` | Expense list, search, filters, budget bar |
+| `/settings` | `SettingsPage` | Account, wallets, categories, budget, backup, danger zone |
 | `/privacy` | `Privacy` | Static privacy policy |
 
----
+### Data layer
 
-## 🏗 Architecture
-
-### Component Tree
+`services/storageService.ts` is the single API; every function branches on `user.type`.
 
 ```
-index.tsx
-└── App.tsx
-    └── BrowserRouter
-        └── ErrorBoundary
-            └── AuthProvider
-                └── StoreProvider
-                    └── NotificationUIProvider
-                        └── AppContent
-                            ├── InstallPrompt
-                            ├── OfflineBanner
-                            ├── ToastContainer
-                            ├── <Routes>
-                            │   ├── / → Tracker
-                            │   ├── /history → History
-                            │   ├── /settings → SettingsPage
-                            │   └── /privacy → Privacy
-                            ├── NotificationCenter (lazy)
-                            ├── QuickAddModal
-                            └── Fixed Footer (FAB + Nav)
+guest → localStorage                (synchronous, this device only)
+user  → Firestore                   (onSnapshot subscriptions, persistent cache)
 ```
 
-### Context Hierarchy
-
-```
-AuthContext          — user, login/logout, guest mode
-  └── StoreContext   — expenses, wallets, categories, budget, notifications
-       └── NotificationUIContext — notification center open/close
-```
-
-### Data Layer
-
-```
-storageService.ts  (unified API — branches on user.type)
-├── Guest Mode     → localStorage (sync read/write)
-└── Cloud Mode     → Firestore (real-time onSnapshot subscriptions)
-     ├── wallets/          — wallet documents
-     ├── wallets/{id}/expenses/ — subcollection per wallet
-     ├── invites/          — invite code docs
-     └── users/{id}        — user profile + custom categories
-```
+Anything touching an unbounded set of documents goes through `commitInChunks` — a
+Firestore batch is capped at 500 writes and fails as a whole beyond that.
 
 ---
 
-## 🛠 Tech Stack
+## Security model
 
-| Layer | Technology |
-|-------|-----------|
-| **Framework** | React 18.3 |
-| **Language** | TypeScript 5.7 (strict mode) |
-| **Build** | Vite 5.4 |
-| **Styling** | Tailwind CSS v4 (CSS-first config, no `tailwind.config.js`) |
-| **Routing** | react-router-dom 6.30 |
-| **Backend** | Firebase 12 (Auth + Firestore) |
-| **Icons** | lucide-react |
-| **PDF** | jspdf + jspdf-autotable |
-| **Dates** | date-fns |
-| **Testing** | Vitest 4 |
-| **PWA** | Custom service worker (`sw.js`) + `manifest.json` |
+Every rule lives in `firestorerules.txt`. Points worth knowing before changing it:
 
----
+- **`/invites` is never listable.** `allow get` only. A blanket `allow read` would let
+  any signed-in user enumerate every invite code, and therefore join every shared
+  wallet in the database. Clients resolve a wallet's own code via
+  `wallets/{id}.inviteCode`.
+- **Joining is locked to one operation.** `isValidWalletJoin()` requires
+  `affectedKeys().hasOnly(['members'])`, that existing members are preserved, and that
+  the array grows by exactly one. Without those, a "joiner" could rewrite `ownerId`
+  and evict everyone.
+- **Settlement writes cannot alter the split.** `isSettlementShapedUpdate()` pins
+  `splitType`, `paidBy` and `participants`, so recording a settlement cannot double as
+  a way to change who owes what.
+- **Members publish only their own display name** into `memberProfiles`.
+- Personal wallets (`isPersonal: true`) can never be joined or shared.
 
-## ⚡ Quick Start
+Run the rules against the emulator before deploying:
 
 ```bash
-# 1. Clone & install
+firebase emulators:start --only firestore
+firebase deploy --only firestore:rules --dry-run   # compile check
+```
+
+---
+
+## Quick start
+
+```bash
 npm install
-
-# 2. Create .env (see Deployment Guide below)
-# 3. Start dev server
+cp .env.example .env        # then fill in your Firebase config
 npm run dev
-
-# 4. Build for production
-npm run build
 ```
 
----
-
-## 🚀 Deployment Guide (Firebase Hosting)
-
-### Prerequisites
-
-```bash
-npm install -g firebase-tools
-```
-
-### Step 1: Environment Setup
-
-Create `.env` in the project root:
+`.env` must define:
 
 ```env
-VITE_FIREBASE_API_KEY=your_api_key
-VITE_FIREBASE_AUTH_DOMAIN=your_project.firebaseapp.com
-VITE_FIREBASE_PROJECT_ID=your_project
-VITE_FIREBASE_STORAGE_BUCKET=your_project.firebasestorage.app
-VITE_FIREBASE_MESSAGING_SENDER_ID=your_sender_id
-VITE_FIREBASE_APP_ID=your_app_id
+VITE_FIREBASE_API_KEY=
+VITE_FIREBASE_AUTH_DOMAIN=
+VITE_FIREBASE_PROJECT_ID=
+VITE_FIREBASE_STORAGE_BUCKET=
+VITE_FIREBASE_MESSAGING_SENDER_ID=
+VITE_FIREBASE_APP_ID=
+# Optional: endpoint for production crash reports (see components/ErrorBoundary.tsx).
+# Whatever host you use must also be added to connect-src in firebase.json.
+VITE_ERROR_REPORT_URL=
 ```
 
-> Firebase config keys are public in client-side apps. Security is enforced by Firestore Security Rules (`firestorerules.txt`).
-
-### Step 2: Deploy Firestore
-
-```bash
-# Security rules
-firebase deploy --only firestore:rules
-
-# Composite indexes
-firebase deploy --only firestore:indexes
-
-# Or both at once
-npm run deploy:firestore
-```
-
-### Step 3: Build & Deploy
-
-```bash
-npm run build
-firebase login
-npm run deploy
-```
-
-Your app will be live at `https://<project-id>.web.app`.
-
-> **Important:** If you see "index required" errors, deploy indexes first. Index creation takes a few minutes.
-
----
-
-## 💻 Development Guide
+> Firebase config keys are public in client-side apps. Security comes from the
+> Firestore rules, not from hiding these.
 
 ### Commands
 
 | Command | Description |
 |---------|-------------|
-| `npm run dev` | Start Vite dev server (HMR at `localhost:5173`) |
-| `npm run build` | `tsc --noEmit` + `vite build` |
-| `npm run test` | Run Vitest test suite |
-| `npm run preview` | Preview production build locally |
-
-### Code Style
-
-- **Components:** PascalCase filenames, default export with `React.memo()`
-- **Hooks:** `usePascalCase`, exported as named functions
-- **Services:** PascalCase files with named exports
-- **Utils:** Pure functions, no side effects
-- **Types:** Centralized in `types.ts`
-- **Imports:** Use `@/` alias (maps to project root)
-
-### Conventions
-
-- All modals accept `isOpen` / `onClose` props with early return pattern (`if (!isOpen) return null`)
-- Focus is trapped inside open modals via `useFocusTrap` hook
-- Safe area insets via inline `style` with `env(safe-area-*)` on every page/modal
-- No CSS modules or CSS-in-JS — pure Tailwind utilities + inline styles
-- Tailwind v4 CSS-first config in `src/index.css` (no `tailwind.config.js`)
+| `npm run dev` | Vite dev server on `localhost:5173` |
+| `npm run build` | `tsc` type check, then `vite build` |
+| `npm run test` | Vitest suite |
+| `npm run preview` | Serve the production build locally |
+| `npm run deploy:rules` | Deploy Firestore rules only |
+| `npm run deploy` | Full Firebase deploy |
 
 ---
 
-## 📁 Project Structure
+## Deployment
+
+```bash
+npm run build
+npm run deploy:rules     # deploy rules first if they changed
+npm run deploy
+```
+
+Hosting headers (CSP, HSTS, `X-Frame-Options`, `nosniff`) are configured in
+`firebase.json`. If you add a third-party service, its origin must be added to
+`connect-src` or the browser will block it.
+
+---
+
+## Project structure
 
 ```
-kharcha-bachau/
-├── App.tsx                    # Root layout, providers, router, nav
-├── index.tsx                  # Entry point + SW registration
-├── index.html                 # HTML shell (PWA meta, fonts)
-├── manifest.json              # PWA web app manifest
-├── sw.js                      # Service Worker (cache strategies)
-│
-├── pages/                     # Route-level page components
-│   ├── Tracker.tsx            #  /  — dashboard, category grid
-│   ├── History.tsx            #  /history  — expense list, search, filters
-│   ├── SettingsPage.tsx       #  /settings — account, wallets, export
-│   └── Privacy.tsx            #  /privacy  — static privacy policy
-│
-├── components/                # Shared/reusable UI
-│   ├── AddExpenseModal.tsx    # Full expense form with keypad, split, tags
-│   ├── EditExpenseModal.tsx   # Edit amount, note, tags, transport
-│   ├── QuickAddModal.tsx      # Category picker → AddExpenseModal
-│   ├── FilterModal.tsx        # Advanced date/category/tag/amount filters
-│   ├── BalanceSummary.tsx     # Group debt visualization + settle
-│   ├── WalletSelector.tsx     # Wallet list, create, join
-│   ├── CategoryManager.tsx    # CRUD for custom categories
-│   ├── AuthModal.tsx          # Google sign-in prompt
-│   ├── ConfirmDialog.tsx      # Destructive confirmation dialog
-│   ├── NotificationCenter.tsx # In-app notification inbox
-│   ├── NotificationBell.tsx   # Bell icon with unread badge
-│   ├── Toast.tsx              # Toast notification container
-│   ├── OfflineBanner.tsx      # Offline status banner
-│   ├── InstallPrompt.tsx      # PWA install banner (Android + iOS)
-│   ├── Skeleton.tsx           # Loading placeholders (3 variants)
-│   └── ErrorBoundary.tsx      # Class-based error boundary
-│
-├── context/                   # React Context providers
-│   ├── AuthContext.tsx         # Firebase auth + guest mode
-│   ├── StoreContext.tsx        # Global store (expenses, wallets, etc.)
-│   └── NotificationUIContext.tsx  # Notification panel open/close
-│
-├── services/                  # Business logic & external integrations
-│   ├── firebase.ts            # Firebase app initialization
-│   ├── storageService.ts      # Unified data layer (guest + Firestore)
-│   ├── notificationService.ts # Budget/settlement/daily notification logic
-│   ├── backupService.ts       # JSON backup export/import/merge
-│   ├── csvService.ts          # CSV file generation
-│   └── pdfService.ts          # PDF report generation (jsPDF)
-│
-├── hooks/                     # Custom React hooks
-│   ├── useCurrentDate.ts      # Date with midnight recalculation
-│   ├── useFocusTrap.ts        # Modal focus management
-│   └── usePWAInstall.ts       # PWA beforeinstallprompt handler
-│
-├── utils/                     # Pure utility functions
-│   ├── balances.ts            # Member balance calculation from split expenses
-│   ├── split.ts               # Split sum validation
-│   ├── date.ts                # Local-time ISO date string
-│   └── currencyFormatter.ts   # Hardcoded Rs. symbol
-│
-├── types.ts                   # All TypeScript interfaces
-├── constants.ts               # Default expense categories
-├── src/index.css              # Tailwind v4 entry + custom utilities/animations
-│
-├── tests/                     # Unit tests
-│   ├── balances.test.ts
-│   ├── money.test.ts
-│   └── backdupService.test.ts
-│
-├── public/                    # Static PWA assets
-├── firestorerules.txt         # Firestore security rules (263 lines)
-├── firestore.indexes.json     # Composite indexes
-├── vite.config.ts             # Vite build config (chunk splitting, plugins)
-├── vitest.config.ts           # Test runner config
-└── tsconfig.json              # TypeScript strict mode config
+App.tsx                    Root layout, providers, router, bottom nav
+index.tsx                  Entry point
+
+pages/                     Route components (Tracker, History, SettingsPage, Privacy)
+components/                Shared UI — modals, dialogs, banners, error boundary
+context/
+  AuthContext.tsx          Firebase auth + guest identity
+  StoreContext.tsx         Global store
+services/
+  firebase.ts              Firebase init (throws if config is missing)
+  storageService.ts        Unified data layer, guest + cloud
+  backupService.ts         JSON export/import + per-row validation
+  csvService.ts            CSV export
+  notificationService.ts   Budget/settlement/daily alert logic
+hooks/                     useCurrentDate, useFocusTrap, usePWAInstall
+utils/
+  balances.ts              Member balance calculation
+  memberNames.ts           uid → display name resolution
+  localData.ts             localStorage keys + cleanup (no Firebase import)
+  split.ts, date.ts, currencyFormatter.ts, categoryIcons.ts
+types.ts                   All interfaces
+firestorerules.txt         Firestore security rules
 ```
 
 ---
 
-## 🔄 State Management
+## State management
 
-### AuthContext
+**AuthContext** — `user`, `isLoading`, `signInWithGoogle`, `logout`,
+`continueAsGuest`, `deleteAccount`. A guest is a random UUID in `localStorage`, not a
+Firebase anonymous user.
 
-```
-State:
-  user: User | null         — { id, name, email, type ('guest'|'user'), createdAt }
-  isLoading: boolean        — true during Firebase auth resolution
+**StoreContext** — wallets, active wallet, expenses, budget, custom categories, toasts,
+`pendingGuestExpenses` / `retryGuestSync` for an incomplete migration.
 
-Actions:
-  signInWithGoogle()        — Firebase popup auth
-  logout()                  — sign out → fall back to guest
-  continueAsGuest()         — create/restore guest from localStorage
-  deleteAccount()           — delete Firestore data + auth user → guest
-```
+Two ordering constraints in `StoreContext`, both load-bearing:
 
-### StoreContext
-
-```
-State (all useState):
-  notifications: Notification[]              — toast queue (auto-dismiss 3s)
-  appNotifications: AppNotification[]        — budget/settlement/daily alerts
-  readNotificationIds: Set<string>           — persisted to localStorage
-  dismissedNotificationIds: Set<string>      — persisted to localStorage
-  wallets: Wallet[]                          — user's wallets
-  activeWallet: Wallet | null                — currently selected
-  expenses: Expense[]                        — active wallet expenses
-  budget: number                             — monthly budget (default: 20000)
-  customCategories: Category[]               — user-defined categories
-  isSyncing: boolean                         — true during Firestore subscription load
-  monthlyStats: MonthlyStats                 — derived from expenses
-
-Key Behaviors:
-  - Guest mode: localStorage read/write (sync)
-  - Cloud mode: Firestore real-time onSnapshot (auto-updates on remote changes)
-  - Expenses subscription: new unsubscribe() on wallet switch
-  - Derived stats: recalculated via useEffect on expenses change
-  - Budget: debounced save (600ms) to prevent Firestore writes on every keystroke
-  - Split editing: auto-recalculates equal/percentage amounts on amount change
-```
-
-### NotificationUIContext
-
-```
-State:
-  isOpen: boolean         — notification panel visibility
-
-Actions:
-  open(), close()
-```
+1. The notification helpers are declared **before** any effect that lists them as a
+   dependency. Dependency arrays are evaluated during render, so a later `const` would
+   be in the temporal dead zone.
+2. The wallet-cache effect never writes an empty array. It also runs on mount, when
+   `wallets` is still `[]`, and would otherwise erase the offline fallback before the
+   loader could read it.
 
 ---
 
-## 📊 Data Flow
-
-```
-User Action → Component → StoreContext Action → storageService
-                                                  ├── Guest: localStorage
-                                                  └── Cloud: Firestore setDoc/updateDoc
-                                                       └── onSnapshot → auto-updates expenses[]
-                                                            └── useEffect → recalculate monthlyStats
-                                                                 └── UI re-renders
-```
-
-### Firestore Collections
+## Data model
 
 ```
 wallets/{walletId}
-  ├── name: string
-  ├── ownerId: string
-  ├── members: string[]
-  ├── currency: "Rs."
-  ├── isPersonal: boolean
-  ├── budget: number (optional)
-  └── createdAt: number
+  id, name, ownerId, members[], currency, createdAt
+  isPersonal?      true = cannot be shared or joined
+  budget?          monthly limit
+  inviteCode?      write-once, 6 chars
+  memberProfiles?  { uid: displayName }
 
 wallets/{walletId}/expenses/{expenseId}
-  ├── categoryId, categoryName, categoryEmoji
-  ├── amount, note, date
-  ├── createdBy: { uid, name }
-  ├── tags?: string[]
-  ├── transportDetails?: { passengers, from, to }
-  ├── splitDetails?: { splitType, participants[], paidBy, settlements[] }
-  ├── createdAt: number
+  id, walletId, categoryId, categoryName, categoryEmoji
+  amount, note, date (YYYY-MM-DD)
+  createdBy { uid, name }, createdAt
+  splitDetails? { splitType: 'equal', participants[], paidBy, settlements[] }
 
-invites/{code}
-  ├── walletId: string
-  └── createdAt: number
-
-users/{userId}
-  ├── name, email
-  ├── customCategories: Category[]
-  └── createdAt: number
+invites/{CODE}     walletId, createdAt          — get only, never listable
+users/{userId}     name, email, customCategories[], createdAt  — self only
 ```
 
 ---
 
-## 🎯 Key Design Decisions
-
-| Decision | Rationale |
-|----------|-----------|
-| **No external state library** | App scope doesn't warrant Redux/Zustand; React Context + useState suffices |
-| **Dual storage layer** | Guest mode enables adoption without sign-up friction; cloud sync is opt-in |
-| **Real-time Firestore subscriptions** | Automatic cross-device sync without manual refresh |
-| **Firestore subcollections** (expenses under wallets) | Scalable: each wallet's expenses are an independent subcollection |
-| **Custom numeric keypad** | Better UX on mobile than native number input; avoids OS keyboard quirks |
-| **`writeBatch` for bulk operations** | Atomic batch writes for wallet deletion, sync, and merge (max 500 per batch) |
-| **LocalStorage for guest** | Simple, zero-infrastructure; acceptable for single-device use |
-| **No virtualization** | Pagination (50-at-a-time) is sufficient for typical personal expense volume |
-| **Tailwind v4 CSS-first** | No config file needed; `@theme` directive in CSS keeps everything co-located |
-| **Pagination reset on filter change** | Simplifies state management; acceptable trade-off for this app's scope |
-
----
-
-## 🧪 Testing
+## Testing
 
 ```bash
 npm run test
 ```
 
-### Test Files
+| File | Covers |
+|------|--------|
+| `tests/balances.test.ts` | Member balance calculation across split types and settlements |
+| `tests/money.test.ts` | Currency formatting and amount edge cases |
+| `tests/backupService.test.ts` | Backup merge and de-duplication |
 
-| File | Tests | What it covers |
-|------|-------|----------------|
-| `tests/balances.test.ts` | 8 | Member balance calculation for all split types + settlements |
-| `tests/money.test.ts` | 6 | Currency formatting, amount validation, edge cases |
-| `tests/backdupService.test.ts` | 4 | Backup merge logic (deduplication by ID) |
+Note that `tsconfig.json` excludes `tests/`, so test files are not type-checked.
 
-### Testing Approach
-
-- **Vitest** with no DOM environment (pure logic tests)
-- Focus on utility functions and data transformation logic
-- UI components are not unit-tested (covered by manual QA)
-- Firestore integration is not mocked (tested via deployment)
+**The largest testing gap is the security rules**, which are the entire authorization
+model and have no automated coverage. Rules changes have so far been verified by
+driving the Firestore emulator over its REST API. Moving that into
+`@firebase/rules-unit-testing` and CI is the highest-value work remaining.
 
 ---
 
-## 🔧 Troubleshooting
+## Known gaps
 
-### Common Issues
-
-| Error | Likely Cause | Fix |
-|-------|-------------|-----|
-| "Missing required Firebase env variables" | `.env` missing or incomplete | Create `.env` with all `VITE_FIREBASE_*` keys |
-| "Permission denied" | Security rules not deployed | Run `firebase deploy --only firestore:rules` |
-| "Index required" | Query needs composite index | Run `firebase deploy --only firestore:indexes` |
-| Data not syncing across devices | Still in guest mode | Sign in with Google |
-| Google Sign-In fails | Provider not enabled in Firebase Console | Enable Google auth in Firebase Console |
-| Popup blocked by browser | Popup blocker | Allow popups for this site |
-
-### Debug Mode
-
-In development (`npm run dev`), the app logs to browser console:
-- Firestore operations (create, read, update, delete)
-- Auth state changes
-- Error details with error codes
-- Data sync operations
-
-### Getting Help
-
-Check browser console → verify deployment steps → review Firebase Console → inspect Firestore rules.
+- **No CI.** No automated type check, test run or dependency audit on push.
+- **No rules test suite.** See above.
+- **No linter configured.**
+- **Notification subsystem is unmounted.** `NotificationCenter`, `NotificationBell` and
+  `NotificationUIContext` are complete but not rendered anywhere, so budget alerts never
+  reach the user. `StoreContext` still computes them on a 5-minute interval.
+- **`AuthModal` is mounted but never opened.** Sign-in happens from Settings only.
+- **Budget is not shown on the home screen** — only on History.
+- **Unused dependencies:** `jspdf`, `jspdf-autotable` (PDF export was removed) and
+  `vite-plugin-static-copy`.
+- **Firebase loads eagerly** (~146 kB gzipped) even in guest mode, which never uses it.
+- **`cleanupDuplicatePersonalWallets`** exists to repair duplicate wallets caused by a
+  failed-read path that has since been fixed; it should be removable.
+- Expense list is not virtualized (paginated at 50 instead).
+- Editing a `custom` split preserves original per-person amounts; only `equal`
+  recalculates.
 
 ---
 
-## ⚠️ Known Issues
-
-### Current Release (v0.4-beta)
-
-- **Expense list not virtualized** — users with 1000+ expenses may see performance degradation. Paginated at 50 per page as a partial mitigation.
-- **Custom split editing** — editing the amount of a `custom` split expense preserves original per-person amounts (only `equal` and `percentage` splits auto-recalculate). Users should delete and re-add for custom split adjustments.
-- **No offline wallet cache** — authenticated users who open the app offline won't see their wallet list. Firebase `onSnapshot` provides cached data for expenses, but wallet metadata isn't cached client-side.
-- **Firestore subscription dead on error** — a single subscription error stops the real-time listener permanently until the user navigates away and back.
-- **Sequential import** — bulk import uses individual `setDoc` calls (not `writeBatch`) for reliability across large imports, trading speed for correctness.
-
-### Fixed in This Release
-
-| Issue | Fix |
-|-------|-----|
-| `BrowserRouter` inside providers caused full re-renders on context change | Moved to top-level `App` wrapper |
-| Editing split expense amount silently corrupted participant data | Auto-recalculates equal/percentage splits |
-| Budget input triggered Firestore write on every keystroke | 600ms debounce added |
-| AddExpenseModal had no animation (all other modals animate) | Added `animate-slide-up-bottom` |
-| Guest banner permanently visible with no dismiss option | Added dismiss button + localStorage |
-| Closing AddExpenseModal with data silently discarded everything | Confirm dialog on unsaved data |
-| `handleSubmit` didn't await `addExpense` — modal closed on failure | Now awaits and keeps modal open on error |
-| Undo snackbar used fade-in instead of slide-up | Changed to `animate-slide-up-bottom` |
-| Unused dead code (`pageCount`, `veggie_nepal` migration, `country` cleanup) | Removed |
-| `NotificationBell` not wrapped in `React.memo()` | Wrapped |
-| `getMemberName` fallback showed raw user ID | Shows "Member xyz4" instead |
-
----
-
-## 📄 License
+## License
 
 Free & open. Built for Nepal.
-
----
 
 **© 2024-2026 Kharcha Bachau**

@@ -5,6 +5,7 @@ import { EXPENSE_CATEGORIES } from '../constants';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { X, Edit2, Trash2, Save } from 'lucide-react';
 import { getCategoryIcon, parseCategoryColor } from '../utils/categoryIcons';
+import ConfirmDialog from './ConfirmDialog';
 
 interface CategoryManagerProps {
   isOpen: boolean;
@@ -14,11 +15,12 @@ interface CategoryManagerProps {
 const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) => {
   const { customCategories, addCustomCategory, updateCustomCategory, deleteCustomCategory, getAllCategories, showNotification } = useStore();
   const [editingCategory, setEditingCategory] = useState<Category | null>(null);
+  const [confirmDeleteCategory, setConfirmDeleteCategory] = useState<Category | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [formData, setFormData] = useState({ name: '', emoji: '', id: '' });
   
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, isOpen);
+  useFocusTrap(modalRef, isOpen, onClose);
 
   const allCategories = useMemo(() => getAllCategories(), [getAllCategories]);
   const defaultCategories = useMemo(() => EXPENSE_CATEGORIES, []);
@@ -48,6 +50,7 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
 
   const handleDelete = async (categoryId: string) => {
     await deleteCustomCategory(categoryId);
+    setConfirmDeleteCategory(null);
   };
 
   const validateForm = (): string => {
@@ -237,7 +240,7 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
               {customCategories.map(cat => (
                 <div
                   key={cat.id}
-                  className="flex flex-col items-center gap-1.5 p-2.5 bg-white rounded-lg border border-slate-300 relative group"
+                  className="flex flex-col items-center gap-1.5 p-2.5 bg-white rounded-lg border border-slate-300"
                 >
                   <div className={`w-12 h-12 rounded-lg flex items-center justify-center ${parseCategoryColor(cat.color).bg}`}>
                     {(() => {
@@ -249,20 +252,23 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
                   <p className="text-xs font-medium text-slate-700 text-center">
                     {cat.name}
                   </p>
-                  <div className="absolute top-1 right-1 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                  {/* Always visible. These used to be opacity-0 until hover, which on a
+                      touch device means never — the only way to edit or remove a custom
+                      category was unreachable on the platform this app is built for. */}
+                  <div className="flex gap-1.5 mt-1">
                     <button
                       onClick={() => handleEdit(cat)}
-                      className="w-6 h-6 bg-emerald-100 text-emerald-600 rounded flex items-center justify-center active:scale-95 hover:bg-emerald-200 transition-colors focus-visible:ring-2"
-                      aria-label="Edit"
+                      className="min-w-[36px] min-h-[36px] flex-1 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-lg flex items-center justify-center active:scale-95 hover:bg-emerald-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500"
+                      aria-label={`Edit ${cat.name}`}
                     >
-                      <Edit2 size={12} />
+                      <Edit2 size={14} />
                     </button>
                     <button
-                      onClick={() => handleDelete(cat.id)}
-                      className="w-6 h-6 bg-rose-100 text-rose-600 rounded flex items-center justify-center active:scale-95 hover:bg-rose-200 transition-colors focus-visible:ring-2"
-                      aria-label="Delete"
+                      onClick={() => setConfirmDeleteCategory(cat)}
+                      className="min-w-[36px] min-h-[36px] flex-1 bg-rose-50 text-rose-700 border border-rose-200 rounded-lg flex items-center justify-center active:scale-95 hover:bg-rose-100 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500"
+                      aria-label={`Delete ${cat.name}`}
                     >
-                      <Trash2 size={12} />
+                      <Trash2 size={14} />
                     </button>
                   </div>
                 </div>
@@ -283,6 +289,16 @@ const CategoryManager: React.FC<CategoryManagerProps> = ({ isOpen, onClose }) =>
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={!!confirmDeleteCategory}
+        title="Delete Category"
+        message={`Delete "${confirmDeleteCategory?.name}"? This cannot be undone. Expenses already saved with this category keep their name.`}
+        confirmLabel="Delete"
+        destructive
+        onConfirm={() => { if (confirmDeleteCategory) handleDelete(confirmDeleteCategory.id); }}
+        onCancel={() => setConfirmDeleteCategory(null)}
+      />
     </div>
   );
 };

@@ -1,5 +1,6 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
+import { clearLocalData } from '../utils/localData';
 
 interface Props {
   children: ReactNode;
@@ -30,10 +31,38 @@ class ErrorBoundary extends Component<Props, State> {
     // Log error to console in development
     if (import.meta.env.DEV) {
       console.error('ErrorBoundary caught an error:', error, errorInfo);
+      return;
     }
-    
-    // In production, you could log to an error reporting service here
-    // Example: logErrorToService(error, errorInfo);
+
+    // Production crashes were previously invisible — nothing was reported anywhere,
+    // so a user hitting a white screen was the only signal it had happened.
+    //
+    // Set VITE_ERROR_REPORT_URL to an endpoint that accepts a JSON POST. Note the
+    // Content-Security-Policy in firebase.json restricts connect-src, so the chosen
+    // host must be added there too or the browser will block this request.
+    const endpoint = import.meta.env.VITE_ERROR_REPORT_URL;
+    if (!endpoint) return;
+
+    try {
+      const body = JSON.stringify({
+        message: error.message,
+        stack: error.stack?.slice(0, 4000),
+        componentStack: errorInfo.componentStack?.slice(0, 4000),
+        version: __APP_VERSION__,
+        url: window.location.pathname, // pathname only — never query or hash
+        userAgent: navigator.userAgent,
+        at: new Date().toISOString(),
+      });
+      // keepalive so the report survives the user immediately reloading.
+      fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body,
+        keepalive: true,
+      }).catch(() => { /* reporting must never itself throw */ });
+    } catch {
+      /* ignore */
+    }
   }
 
   handleReset = () => {
@@ -41,6 +70,19 @@ class ErrorBoundary extends Component<Props, State> {
       hasError: false,
       error: null
     });
+  };
+
+  // Last resort for a crash that repeats on every load — corrupt data persisted in
+  // local storage, for instance. Without this the only escape is clearing site data
+  // through browser settings, which a non-technical user will not find.
+  handleClearData = () => {
+    const confirmed = window.confirm(
+      'This deletes the expenses saved on this device and starts fresh. ' +
+      'Anything already backed up to your account is not affected. Continue?'
+    );
+    if (!confirmed) return;
+    clearLocalData();
+    window.location.reload();
   };
 
   render() {
@@ -93,6 +135,19 @@ class ErrorBoundary extends Component<Props, State> {
             >
               Reload Page
             </button>
+
+            <div className="mt-6 pt-5 border-t border-slate-200">
+              <p className="text-xs text-slate-500 mb-3 leading-relaxed">
+                Still not working after reloading? You can clear the data saved on this
+                device and start again. Anything backed up to your account stays safe.
+              </p>
+              <button
+                onClick={this.handleClearData}
+                className="w-full bg-white text-rose-700 border border-rose-200 px-6 py-3 rounded-xl font-semibold hover:bg-rose-50 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
+              >
+                Clear data on this device
+              </button>
+            </div>
           </div>
         </div>
       );

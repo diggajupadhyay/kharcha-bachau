@@ -76,8 +76,8 @@ const AppContent: React.FC = () => {
               <NavLink to="/" className="flex flex-col items-center justify-center gap-1 flex-1 pt-6 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
                 {({ isActive }) => (
                   <>
-                    <LayoutGrid size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-400'} />
-                    <span className={`text-[10px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-400'}`}>Home</span>
+                    <LayoutGrid size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-500'} />
+                    <span className={`text-[11px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-500'}`}>Home</span>
                   </>
                 )}
               </NavLink>
@@ -86,8 +86,8 @@ const AppContent: React.FC = () => {
               <NavLink to="/history" className="flex flex-col items-center justify-center gap-1 flex-1 pt-6 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
                 {({ isActive }) => (
                   <>
-                    <Clock size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-400'} />
-                    <span className={`text-[10px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-400'}`}>History</span>
+                    <Clock size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-500'} />
+                    <span className={`text-[11px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-500'}`}>History</span>
                   </>
                 )}
               </NavLink>
@@ -107,8 +107,8 @@ const AppContent: React.FC = () => {
               <NavLink to="/settings" className="flex flex-col items-center justify-center gap-1 flex-1 pt-6 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
                 {({ isActive }) => (
                   <>
-                    <SettingsIcon size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-400'} />
-                    <span className={`text-[10px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-400'}`}>Settings</span>
+                    <SettingsIcon size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-500'} />
+                    <span className={`text-[11px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-500'}`}>Settings</span>
                   </>
                 )}
               </NavLink>

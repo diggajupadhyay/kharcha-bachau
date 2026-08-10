@@ -144,7 +144,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     try {
-      // Delete all Firestore data first (needs an authenticated session).
+      // Delete all Firestore data first (needs an authenticated session). This throws
+      // if any of it could not be removed, which deliberately prevents the auth user
+      // below from being deleted — otherwise the data would be stranded with no
+      // account left that is allowed to delete it.
       await storage.deleteAccount({
         id: currentUser.uid,
         name: currentUser.displayName || 'User',
@@ -162,6 +165,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       if (error.code === 'auth/requires-recent-login') {
         throw new Error('Please sign out and sign in again before deleting your account.');
+      }
+      // Keep the specific reason from the data layer — it names which wallets could
+      // not be cleared, which a flat "please try again" would throw away.
+      if (error instanceof Error && error.message) {
+        throw error;
       }
       throw new Error('Failed to delete account. Please try again.');
     }

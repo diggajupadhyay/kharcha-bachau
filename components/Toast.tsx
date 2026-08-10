@@ -8,10 +8,15 @@ const ToastContainer: React.FC = () => {
   if (notifications.length === 0) return null;
 
   return (
-    <div className="fixed top-4 md:top-6 lg:top-8 left-0 right-0 z-notification flex flex-col items-center gap-3 px-4 md:px-6 lg:px-8 pointer-events-none">
+    <div
+      className="fixed top-4 md:top-6 lg:top-8 left-0 right-0 z-notification flex flex-col items-center gap-3 px-4 md:px-6 lg:px-8 pointer-events-none"
+      aria-live="polite"
+      aria-atomic="false"
+    >
       {notifications.map((note) => (
         <div 
             key={note.id}
+            role={note.type === 'error' ? 'alert' : 'status'}
             className={`
                 pointer-events-auto flex items-center gap-3 md:gap-4 px-4 md:px-6 lg:px-8 py-3 md:py-4 rounded-xl border max-w-sm md:max-w-md lg:max-w-lg w-full shadow-lg
                 ${note.type === 'success' ? 'bg-white border-emerald-200 text-slate-900' : ''}
@@ -34,7 +39,8 @@ const ToastContainer: React.FC = () => {
             
             <button 
                 onClick={() => dismissNotification(note.id)}
-                className="p-2 md:p-2.5 text-slate-400 active:scale-95 hover:text-slate-600 transition-colors"
+                className="p-2 md:p-2.5 text-slate-500 active:scale-95 hover:text-slate-700 transition-colors"
+                aria-label="Dismiss notification"
             >
                 <X size={20} className="md:w-5 md:h-5 lg:w-6 lg:h-6" />
             </button>

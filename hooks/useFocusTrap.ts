@@ -1,4 +1,4 @@
-import { useEffect, RefObject } from 'react';
+import { useEffect, useRef, RefObject } from 'react';
 
 const FOCUSABLE =
   'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -9,7 +9,16 @@ const FOCUSABLE =
  * focused element (the trigger) on close. Improves keyboard /
  * screen-reader usability and keeps Tab from escaping the modal.
  */
-export function useFocusTrap(ref: RefObject<HTMLElement>, active: boolean) {
+export function useFocusTrap(
+  ref: RefObject<HTMLElement>,
+  active: boolean,
+  onEscape?: () => void
+) {
+  // Kept in a ref so changing the handler does not tear down and rebuild the trap,
+  // which would steal focus back to the first element mid-interaction.
+  const escapeRef = useRef(onEscape);
+  escapeRef.current = onEscape;
+
   useEffect(() => {
     if (!active || !ref.current) return;
     const container = ref.current;
@@ -25,6 +34,14 @@ export function useFocusTrap(ref: RefObject<HTMLElement>, active: boolean) {
     initial?.focus();
 
     const onKeyDown = (e: KeyboardEvent) => {
+      // Escape closes the dialog. Nothing in the app handled it before, so a keyboard
+      // user could enter any modal and had no way to dismiss it without a mouse.
+      if (e.key === 'Escape' && escapeRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        escapeRef.current();
+        return;
+      }
       if (e.key !== 'Tab') return;
       const items = getItems();
       if (items.length === 0) {

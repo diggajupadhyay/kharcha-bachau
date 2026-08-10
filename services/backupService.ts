@@ -13,7 +13,7 @@ export interface BackupData {
   };
 }
 
-const APP_VERSION = '0.3.0-beta';
+const APP_VERSION = __APP_VERSION__;
 
 /**
  * Export all data to JSON backup file
@@ -65,6 +65,53 @@ export const validateBackup = (data: any): data is BackupData => {
 };
 
 /**
+ * True only for a real calendar date in YYYY-MM-DD form. `new Date()` rolls invalid
+ * days forward (Feb 30 becomes Mar 2), so the parts are compared after the round trip.
+ */
+const isRealDateString = (value: unknown): boolean => {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const [y, m, d] = value.split('-').map(Number);
+  const parsed = new Date(y, m - 1, d);
+  return parsed.getFullYear() === y && parsed.getMonth() === m - 1 && parsed.getDate() === d;
+};
+
+/**
+ * Validates a single expense from a backup file.
+ *
+ * Cloud restores are protected by the Firestore security rules, but guest restores
+ * write straight to local storage with nothing in between. A row with a malformed
+ * `date` used to be persisted and then throw during render on the History screen —
+ * every reload, with no way out of it from inside the app.
+ */
+export const isValidBackupExpense = (value: unknown): value is Expense => {
+  if (!value || typeof value !== 'object') return false;
+  const e = value as Record<string, any>;
+  return (
+    typeof e.id === 'string' && e.id.length > 0 &&
+    typeof e.amount === 'number' && Number.isFinite(e.amount) && e.amount > 0 &&
+    isRealDateString(e.date) &&
+    typeof e.categoryId === 'string' && e.categoryId.length > 0 &&
+    typeof e.categoryName === 'string' && e.categoryName.length > 0 &&
+    typeof e.categoryEmoji === 'string' &&
+    typeof e.note === 'string' &&
+    typeof e.createdAt === 'number' && Number.isFinite(e.createdAt) &&
+    !!e.createdBy && typeof e.createdBy === 'object' &&
+    typeof e.createdBy.uid === 'string' &&
+    typeof e.createdBy.name === 'string'
+  );
+};
+
+/**
+ * Splits a backup's expenses into the usable ones and a count of what was dropped.
+ */
+export const sanitizeBackupExpenses = (
+  expenses: unknown[]
+): { valid: Expense[]; rejected: number } => {
+  const valid = expenses.filter(isValidBackupExpense);
+  return { valid, rejected: expenses.length - valid.length };
+};
+
+/**
  * Import backup from JSON file
  */
 export const importBackup = async (file: File): Promise<BackupData> => {
@@ -107,15 +154,18 @@ export const previewBackup = async (file: File): Promise<{
   version: string;
   exportDate: string;
   expenseCount: number;
+  rejectedCount: number;
   walletCount: number;
   budget: number;
   customCategoryCount: number;
 }> => {
   const backup = await importBackup(file);
+  const { valid, rejected } = sanitizeBackupExpenses(backup.data.expenses);
   return {
     version: backup.version,
     exportDate: backup.exportDate,
-    expenseCount: backup.data.expenses.length,
+    expenseCount: valid.length,
+    rejectedCount: rejected,
     walletCount: backup.data.wallets.length,
     budget: backup.data.budget,
     customCategoryCount: backup.data.customCategories.length

@@ -4,12 +4,38 @@ import { isSplitSumValid } from '../utils/split';
 import {
   doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc,
   collection, query, where, orderBy, limit,
-  writeBatch, onSnapshot, arrayRemove, arrayUnion
+  writeBatch, onSnapshot, arrayRemove, arrayUnion,
+  type WriteBatch, type DocumentReference
 } from 'firebase/firestore';
 
-const GUEST_DATA_KEY = 'daily_expenses_guest_v1';
-const MONTHLY_BUDGET_KEY = 'daily_expenses_budget_monthly';
-const GUEST_CATEGORIES_KEY = 'kharcha_bachau_custom_categories_guest';
+import {
+  GUEST_DATA_KEY, GUEST_CATEGORIES_KEY, MONTHLY_BUDGET_KEY,
+  DEFAULT_BUDGET, budgetKey, clearLocalData
+} from '../utils/localData';
+
+export { DEFAULT_BUDGET, clearLocalData };
+
+// Firestore rejects a batch of more than 500 writes outright — not partially, the
+// whole commit fails. Everything that touches an unbounded set of documents has to
+// go through here, or it silently stops working once a wallet passes ~500 expenses.
+const BATCH_CHUNK_SIZE = 450;
+
+// Ceiling on how many expenses a wallet subscription will load at once.
+export const EXPENSE_PAGE_LIMIT = 2000;
+
+const commitInChunks = async <T>(
+  items: T[],
+  apply: (batch: WriteBatch, item: T) => void
+): Promise<void> => {
+  for (let i = 0; i < items.length; i += BATCH_CHUNK_SIZE) {
+    const batch = writeBatch(db);
+    items.slice(i, i + BATCH_CHUNK_SIZE).forEach(item => apply(batch, item));
+    await batch.commit();
+  }
+};
+
+const deleteDocsInChunks = (refs: DocumentReference[]): Promise<void> =>
+  commitInChunks(refs, (batch, ref) => batch.delete(ref));
 
 export const createGuestWallet = (): Wallet => ({
     id: 'guest_wallet',
@@ -34,9 +60,10 @@ export const createWallet = async (user: User, walletName: string, isPersonal: b
             members: [user.id],
             currency: 'Rs.',
             createdAt: Date.now(),
-            isPersonal: isPersonal
+            isPersonal: isPersonal,
+            ...(isPersonal ? {} : { memberProfiles: { [user.id]: user.name } })
         };
-        
+
         await setDoc(newWalletRef, newWallet);
         
         if (import.meta.env.DEV) {
@@ -79,8 +106,12 @@ export const getUserWallets = async (user: User): Promise<Wallet[]> => {
         if (import.meta.env.DEV) {
             console.error("Error fetching wallets:", error.code, error.message);
         }
-        
-        return [];
+
+        // Deliberately throws rather than returning []. An empty array is
+        // indistinguishable from "this user genuinely owns no wallets", and callers
+        // reacted to that by creating a fresh Personal Wallet — so every failed read
+        // minted a duplicate. Let the caller decide, and let it fall back to cache.
+        throw new Error('Could not load your wallets. Please check your connection.');
     }
 };
 
@@ -116,17 +147,14 @@ export const deleteWallet = async (user: User, walletId: string) => {
     try {
         const expensesRef = collection(db, 'wallets', walletId, 'expenses');
         const snapshot = await getDocs(expensesRef);
-        
-        const batch = writeBatch(db);
-        snapshot.docs.forEach((docSnap) => {
-            batch.delete(docSnap.ref);
-        });
-        
-        const walletRef = doc(db, 'wallets', walletId);
-        batch.delete(walletRef);
 
-        await batch.commit();
-        
+        // Expenses first, in chunks, then the wallet itself. This is no longer one
+        // atomic commit — it cannot be, past 500 documents — so a mid-way failure
+        // leaves a partially emptied wallet. That is recoverable by retrying; the
+        // previous single batch simply refused to delete anything at all.
+        await deleteDocsInChunks(snapshot.docs.map(docSnap => docSnap.ref));
+        await deleteDoc(doc(db, 'wallets', walletId));
+
         if (import.meta.env.DEV) {
             console.log('Wallet deleted successfully:', walletId);
         }
@@ -166,46 +194,27 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
         const targetSnapshot = await getDocs(targetExpensesRef);
         const existingExpenseIds = new Set(targetSnapshot.docs.map(doc => doc.id));
 
-        const batch = writeBatch(db);
-        let mergedCount = 0;
-        let skippedCount = 0;
+        const toMerge = sourceSnapshot.docs
+            .map(docSnap => docSnap.data() as Expense)
+            .filter(expense => !existingExpenseIds.has(expense.id));
+        const skippedCount = sourceSnapshot.docs.length - toMerge.length;
 
-        sourceSnapshot.docs.forEach((docSnap) => {
-            const expense = docSnap.data() as Expense;
-            
-            if (existingExpenseIds.has(expense.id)) {
-                skippedCount++;
-                if (import.meta.env.DEV) {
-                    console.log(`Skipping duplicate expense: ${expense.id}`);
+        await commitInChunks(toMerge, (batch, expense) => {
+            batch.set(doc(targetExpensesRef, expense.id), {
+                ...expense,
+                walletId: targetWalletId,
+                createdBy: {
+                    uid: user.id,
+                    name: user.name
                 }
-            } else {
-                const newExpenseRef = doc(targetExpensesRef, expense.id);
-                const mergedExpense: Expense = {
-                    ...expense,
-                    walletId: targetWalletId,
-                    createdBy: {
-                        uid: user.id,
-                        name: user.name
-                    }
-                };
-                batch.set(newExpenseRef, mergedExpense);
-                mergedCount++;
-            }
+            } as Expense);
         });
 
-        await batch.commit();
-
-        const deleteBatch = writeBatch(db);
-        
         const remainingExpensesSnapshot = await getDocs(sourceExpensesRef);
-        remainingExpensesSnapshot.docs.forEach((docSnap) => {
-            deleteBatch.delete(docSnap.ref);
-        });
-        
-        const sourceWalletRef = doc(db, 'wallets', sourceWalletId);
-        deleteBatch.delete(sourceWalletRef);
-        
-        await deleteBatch.commit();
+        await deleteDocsInChunks(remainingExpensesSnapshot.docs.map(docSnap => docSnap.ref));
+        await deleteDoc(doc(db, 'wallets', sourceWalletId));
+
+        const mergedCount = toMerge.length;
 
         if (import.meta.env.DEV) {
             console.log(`Wallet merge completed: ${mergedCount} expenses merged, ${skippedCount} duplicates skipped`);
@@ -288,34 +297,56 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
     }
 };
 
+// Generates a 6-character invite code using the CSPRNG. Excludes characters that
+// are easy to misread when a code is copied off someone else's screen (0/O, 1/I).
+const INVITE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const generateInviteCode = (): string => {
+    const bytes = new Uint8Array(6);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, b => INVITE_ALPHABET[b % INVITE_ALPHABET.length]).join('');
+};
+
 export const getOrGenerateInviteCode = async (walletId: string): Promise<string> => {
     try {
-        const q = query(collection(db, 'invites'), where('walletId', '==', walletId), limit(1));
-        const existing = await getDocs(q);
-        if (!existing.empty) {
-            return existing.docs[0].id;
+        // The code is stored on the wallet document. Looking it up there (a single
+        // authorised `get`) is what allows /invites to stay non-listable — listing
+        // that collection would expose every wallet in the database.
+        const walletRef = doc(db, 'wallets', walletId);
+        const walletSnap = await getDoc(walletRef);
+        const existingCode = walletSnap.exists() ? walletSnap.data()?.inviteCode : undefined;
+        if (typeof existingCode === 'string' && existingCode.length > 0) {
+            return existingCode;
         }
 
         const maxRetries = 5;
         let attempts = 0;
         
         while (attempts < maxRetries) {
-            const code = Math.random().toString(36).substring(2, 8).toUpperCase();
-            
+            const code = generateInviteCode();
+
             const codeDocRef = doc(db, 'invites', code);
             const codeDoc = await getDoc(codeDocRef);
-            
+
             if (!codeDoc.exists()) {
                 try {
                     await setDoc(codeDocRef, {
                         walletId,
                         createdAt: Date.now()
                     });
-                    
+
+                    // Publish the code on the wallet so members can read it back without
+                    // querying /invites. Best-effort: a losing race just means the next
+                    // reader regenerates, and both codes stay valid for the same wallet.
+                    try {
+                        await updateDoc(walletRef, { inviteCode: code });
+                    } catch {
+                        /* wallet already has a code, or the write raced — code still works */
+                    }
+
                     if (import.meta.env.DEV) {
                         console.log('Invite code generated:', code);
                     }
-                    
+
                     return code;
                 } catch (error: any) {
                     if (error.code === 'permission-denied' || error.code === 'already-exists') {
@@ -362,7 +393,17 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
         await updateDoc(doc(db, 'wallets', walletId), {
             members: arrayUnion(user.id)
         });
-        
+
+        // Separate write: the join rule permits changing `members` and nothing else,
+        // so the name goes on afterwards. Failure here is cosmetic, not a failed join.
+        try {
+            await updateDoc(doc(db, 'wallets', walletId), {
+                [`memberProfiles.${user.id}`]: user.name
+            });
+        } catch {
+            /* name will be published on the next wallet switch */
+        }
+
         if (import.meta.env.DEV) {
             console.log('Joined wallet successfully:', walletId);
         }
@@ -399,6 +440,22 @@ const saveLocalData = (data: Expense[]) => {
   localStorage.setItem(GUEST_DATA_KEY, JSON.stringify(data));
 };
 
+/**
+ * Notifies other tabs that guest data changed.
+ *
+ * Guest writes replace the entire expense array, so two tabs each holding their own
+ * snapshot would clobber one another — last write wins, and the other tab's entries
+ * vanish with no error. The `storage` event only fires in *other* tabs, which is
+ * exactly what is needed here.
+ */
+export const subscribeToGuestDataChanges = (onChange: () => void): (() => void) => {
+  const handler = (e: StorageEvent) => {
+    if (e.key === GUEST_DATA_KEY) onChange();
+  };
+  window.addEventListener('storage', handler);
+  return () => window.removeEventListener('storage', handler);
+};
+
 const buildExpenseDocument = (
   expense: Omit<Expense, 'id' | 'createdAt' | 'walletId' | 'createdBy'>,
   user: User,
@@ -428,7 +485,10 @@ const buildExpenseDocument = (
 };
 
 export const addExpense = async (user: User, activeWalletId: string, expense: Omit<Expense, 'id' | 'createdAt' | 'walletId' | 'createdBy'>) => {
-    if (isNaN(expense.amount) || expense.amount < 0) throw new Error("Invalid amount");
+    // Cloud writes are bounded by the security rules; guest writes are not, so the
+    // same limits are applied here for both.
+    if (!Number.isFinite(expense.amount) || expense.amount <= 0) throw new Error("Enter an amount greater than 0");
+    if (expense.amount > 1000000000) throw new Error("That amount is too large");
     if (expense.note && expense.note.length > 500) throw new Error("Note too long (max 500 characters)");
 
     if (expense.splitDetails) {
@@ -483,7 +543,10 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
 };
 
 export const updateExpense = async (user: User, activeWalletId: string, expenseId: string, updates: Partial<Expense>) => {
-    if (updates.amount !== undefined && (isNaN(updates.amount) || updates.amount < 0)) throw new Error("Invalid amount");
+    if (updates.amount !== undefined) {
+        if (!Number.isFinite(updates.amount) || updates.amount <= 0) throw new Error("Enter an amount greater than 0");
+        if (updates.amount > 1000000000) throw new Error("That amount is too large");
+    }
 
     // Validate split sums client-side when both amount and splitDetails are provided
     if (updates.splitDetails !== undefined && updates.amount !== undefined) {
@@ -652,14 +715,9 @@ export const clearAllExpenses = async (user: User, walletId: string) => {
         try {
             const expensesRef = collection(db, 'wallets', walletId, 'expenses');
             const snapshot = await getDocs(expensesRef);
-            
-            const batch = writeBatch(db);
-            snapshot.docs.forEach((docSnap) => {
-                batch.delete(docSnap.ref);
-            });
-            
-            await batch.commit();
-            
+
+            await deleteDocsInChunks(snapshot.docs.map(docSnap => docSnap.ref));
+
             if (import.meta.env.DEV) {
                 console.log('All expenses cleared from Firestore:', snapshot.docs.length);
             }
@@ -685,7 +743,10 @@ export const subscribeToWalletExpenses = (
     onError?: (error: unknown) => void
 ) => {
     const expensesRef = collection(db, 'wallets', walletId, 'expenses');
-    const q = query(expensesRef, orderBy('date', 'desc'));
+    // Newest first, with a ceiling. Unbounded, this re-downloaded a wallet's entire
+    // history on every cold start. 2000 entries is well over five years of daily use;
+    // anything older simply is not loaded, which also caps memory and read cost.
+    const q = query(expensesRef, orderBy('date', 'desc'), limit(EXPENSE_PAGE_LIMIT));
 
     const MAX_RETRIES = 5;
     const RETRY_BASE_DELAY = 1000;
@@ -740,6 +801,31 @@ export const getGuestExpenses = (): Expense[] => {
     return getLocalData();
 };
 
+// Expenses still sitting in this device's local storage. Non-zero for a signed-in
+// user means a previous migration did not complete and the data is stranded —
+// present on the device but invisible, because cloud mode never reads local storage.
+export const getPendingGuestExpenseCount = (): number => getLocalData().length;
+
+// Publishes the current user's display name onto a shared wallet so other members can
+// see who they are splitting with. Best-effort and idempotent: it only writes when the
+// stored name is missing or has changed, so it is safe to call on every wallet switch.
+export const ensureMemberProfile = async (user: User, wallet: Wallet): Promise<void> => {
+  if (user.type === 'guest' || wallet.isPersonal || wallet.id === 'guest_wallet') return;
+  if (!user.name) return;
+  if (wallet.memberProfiles?.[user.id] === user.name) return;
+
+  try {
+    await updateDoc(doc(db, 'wallets', wallet.id), {
+      [`memberProfiles.${user.id}`]: user.name
+    });
+  } catch (error: any) {
+    // Non-essential: the UI falls back to names taken from expenses.
+    if (import.meta.env.DEV) {
+      console.error('Could not publish member profile:', error?.code, error?.message);
+    }
+  }
+};
+
 export const syncGuestData = async (user: User) => {
     const localData = getLocalData();
     if (localData.length === 0) {
@@ -768,8 +854,9 @@ export const syncGuestData = async (user: User) => {
             personalWallet = newPersonalWallet;
         }
 
-        const batch = writeBatch(db);
-        localData.forEach(p => {
+        // Chunked: a guest with a couple of years of daily expenses would otherwise
+        // exceed the batch limit and could never migrate at all.
+        await commitInChunks(localData, (batch, p) => {
             const ref = doc(db, 'wallets', personalWallet!.id, 'expenses', p.id);
             const expenseWithMeta: Expense = {
                 ...p,
@@ -779,7 +866,7 @@ export const syncGuestData = async (user: User) => {
             batch.set(ref, expenseWithMeta);
         });
 
-        await batch.commit();
+        // Only now is it safe to drop the local copy.
         localStorage.removeItem(GUEST_DATA_KEY);
         
         if (import.meta.env.DEV) {
@@ -796,25 +883,44 @@ export const syncGuestData = async (user: User) => {
     }
 };
 
-export const bulkImportExpenses = async (user: User, expenses: Expense[]): Promise<{ imported: number; skipped: number }> => {
-  if (user.type === 'guest') {
-    saveLocalData(expenses);
-    return { imported: expenses.length, skipped: 0 };
-  }
+// Guest restore: the local store holds one array, so it is replaced wholesale with
+// the already-merged list.
+export const replaceGuestExpenses = (expenses: Expense[]): void => {
+  saveLocalData(expenses);
+};
 
+// Cloud restore: write expenses into the wallet the user is currently looking at.
+//
+// The previous version wrote each row to the walletId recorded *inside the backup
+// file*. A backup taken in guest mode carries walletId 'guest_wallet', which does not
+// exist in Firestore, so every write was denied and reported as "skipped" — the most
+// common restore scenario (lost phone, signed in on a new one) imported nothing at
+// all. Rows are retargeted at `targetWalletId` instead.
+//
+// Written one document at a time on purpose: the security rules validate each expense
+// independently, so a single malformed row in a hand-edited backup would take a whole
+// batch down with it. This trades speed for an accurate per-row skipped count.
+export const importExpensesToWallet = async (
+  user: User,
+  expenses: Expense[],
+  targetWalletId: string
+): Promise<{ imported: number; skipped: number }> => {
   let imported = 0;
   let skipped = 0;
 
   for (const expense of expenses) {
     try {
-      const expenseRef = doc(db, 'wallets', expense.walletId, 'expenses', expense.id);
-      const updatedExpense: Expense = {
+      const retargeted: Expense = {
         ...expense,
+        walletId: targetWalletId,
         createdBy: { uid: user.id, name: user.name }
       };
-      await setDoc(expenseRef, updatedExpense, { merge: true });
+      await setDoc(doc(db, 'wallets', targetWalletId, 'expenses', expense.id), retargeted);
       imported++;
-    } catch {
+    } catch (error: any) {
+      if (import.meta.env.DEV) {
+        console.error('Skipped expense during import:', expense.id, error?.code, error?.message);
+      }
       skipped++;
     }
   }
@@ -822,46 +928,70 @@ export const bulkImportExpenses = async (user: User, expenses: Expense[]): Promi
   return { imported, skipped };
 };
 
-// Delete a user's entire account and all associated data.
-// - Deletes every wallet the user owns or is a member of (and their expenses)
-// - Deletes the user's own user document
+// Removes only the expenses this user created from a wallet somebody else owns.
+// The security rules let a member delete their own expenses but not other people's,
+// so a blanket wallet delete would be rejected and leave everything behind.
+const deleteOwnExpensesInWallet = async (user: User, walletId: string) => {
+  const q = query(
+    collection(db, 'wallets', walletId, 'expenses'),
+    where('createdBy.uid', '==', user.id)
+  );
+  const snapshot = await getDocs(q);
+  await deleteDocsInChunks(snapshot.docs.map(d => d.ref));
+};
+
+// Delete a user's account data.
+// - Wallets they own are deleted outright, along with their expenses.
+// - Wallets they merely joined keep existing for the other members, but the user's
+//   own expenses are removed and the user leaves. Previously these wallets were
+//   handed to deleteWallet, which is owner-only: the write failed, the error was
+//   swallowed, and the user's expenses — carrying their real display name — stayed
+//   in other people's wallets forever with no account left to remove them.
+// Throws if anything could not be removed, so the caller does NOT delete the auth
+// user and the operation stays retryable.
 // Caller is responsible for signing the user out afterwards.
 export const deleteAccount = async (user: User): Promise<void> => {
   if (user.type === 'guest') {
-    // Guests only store data locally — clear it and return.
-    try {
-      localStorage.removeItem(GUEST_DATA_KEY);
-      localStorage.removeItem(GUEST_CATEGORIES_KEY);
-      localStorage.removeItem('kharcha_bachau_guest_v1');
-      localStorage.removeItem('kharcha_bachau_active_wallet_id');
-    } catch {
-      // ignore
-    }
+    clearLocalData();
     return;
   }
 
   try {
     const wallets = await getUserWallets(user);
+    const failed: string[] = [];
 
     for (const wallet of wallets) {
       try {
-        await deleteWallet(user, wallet.id);
+        if (wallet.ownerId === user.id) {
+          await deleteWallet(user, wallet.id);
+        } else {
+          await deleteOwnExpensesInWallet(user, wallet.id);
+          await leaveWallet(user, wallet.id);
+        }
       } catch (error: any) {
         if (import.meta.env.DEV) {
-          console.error(`Failed to delete wallet ${wallet.id} during account deletion:`, error);
+          console.error(`Failed to clear wallet ${wallet.id} during account deletion:`, error);
         }
-        // Continue deleting other wallets even if one fails.
+        failed.push(wallet.name || wallet.id);
       }
     }
 
-    // Delete the user's own document last.
     try {
       await deleteDoc(doc(db, 'users', user.id));
     } catch (error: any) {
       if (import.meta.env.DEV) {
         console.error('Failed to delete user document:', error);
       }
+      failed.push('your profile');
     }
+
+    if (failed.length > 0) {
+      throw new Error(
+        `Could not remove your data from: ${failed.join(', ')}. Your account has not been deleted — please check your connection and try again.`
+      );
+    }
+
+    clearLocalData();
 
     if (import.meta.env.DEV) {
       console.log('Account data deletion completed for user:', user.id);
@@ -869,6 +999,10 @@ export const deleteAccount = async (user: User): Promise<void> => {
   } catch (error: any) {
     if (import.meta.env.DEV) {
       console.error('Error during account deletion:', error);
+    }
+    // Preserve the detailed message built above; only generic failures get rewritten.
+    if (error instanceof Error && error.message.startsWith('Could not remove your data')) {
+      throw error;
     }
     throw new Error('Failed to delete account. Please try again.');
   }
@@ -889,19 +1023,25 @@ export const getStoredBudget = async (user: User | null, walletId: string | unde
       // Fall through to localStorage
     }
   }
-  const b = localStorage.getItem(MONTHLY_BUDGET_KEY);
-  const parsed = b ? parseFloat(b) : NaN;
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 20000;
+  // Scoped key first, then the pre-v0.8 global key so an existing budget carries over
+  // to the wallet the user was last using instead of silently resetting to the default.
+  const scoped = localStorage.getItem(budgetKey(walletId));
+  const raw = scoped !== null ? scoped : localStorage.getItem(MONTHLY_BUDGET_KEY);
+  const parsed = raw ? parseFloat(raw) : NaN;
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : DEFAULT_BUDGET;
 };
 
 export const saveStoredBudget = async (user: User | null, walletId: string | undefined, amount: number) => {
-  localStorage.setItem(MONTHLY_BUDGET_KEY, amount.toString());
+  localStorage.setItem(budgetKey(walletId), amount.toString());
   if (user?.type === 'user' && walletId && walletId !== 'guest_wallet') {
     try {
       const walletRef = doc(db, 'wallets', walletId);
       await updateDoc(walletRef, { budget: amount });
-    } catch {
-      // Firestore write is best-effort; localStorage is the fallback
+    } catch (error: any) {
+      // Best-effort: the scoped localStorage value above still holds on this device.
+      if (import.meta.env.DEV) {
+        console.error('Failed to sync budget to Firestore:', error);
+      }
     }
   }
 };

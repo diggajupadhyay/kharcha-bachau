@@ -3,6 +3,7 @@ import { Expense } from '../types';
 import { useStore } from '../context/StoreContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
 import { useFocusTrap } from '../hooks/useFocusTrap';
+import { buildMemberNameMap, memberNameFrom } from '../utils/memberNames';
 import { X, CheckCircle2, Users } from 'lucide-react';
 
 interface EditExpenseModalProps {
@@ -12,37 +13,47 @@ interface EditExpenseModalProps {
 }
 
 const EditExpenseModal: React.FC<EditExpenseModalProps> = ({ expense, isOpen, onClose }) => {
-  const { updateExpense, expenses } = useStore();
+  const { updateExpense, expenses, activeWallet } = useStore();
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
+  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const currencySymbol = getCurrencySymbol();
   
   // Get all existing tags from expenses for autocomplete
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, isOpen);
+  useFocusTrap(modalRef, isOpen, onClose);
 
-  // Get member name helper
-  const getMemberName = (userId: string): string => {
-    const expenseWithUser = expenses.find(e => e.createdBy.uid === userId);
-    if (expenseWithUser) return expenseWithUser.createdBy.name;
-    return `Member ${userId.substring(0, 4)}`;
-  };
+  const getMemberName = (userId: string): string =>
+    memberNameFrom(buildMemberNameMap(activeWallet, expenses), userId);
 
   useEffect(() => {
     if (isOpen && expense) {
       setAmount(expense.amount.toString());
       setNote(expense.note);
+      setError('');
 
     }
   }, [isOpen, expense]);
 
   if (!isOpen || !expense) return null;
 
-  const handleUpdate = () => {
+  const handleUpdate = async () => {
+      if (isSaving) return;
       const val = parseFloat(amount);
-      if (!isNaN(val) && val > 0) {
-          updateExpense(expense.id, val, note);
+      if (isNaN(val) || val <= 0) {
+          // Previously this branch did nothing whatsoever — the button simply
+          // appeared not to work.
+          setError('Enter an amount greater than 0');
+          return;
+      }
+      setError('');
+      setIsSaving(true);
+      try {
+          await updateExpense(expense.id, val, note);
           onClose();
+      } finally {
+          setIsSaving(false);
       }
   };
 
@@ -87,10 +98,12 @@ const EditExpenseModal: React.FC<EditExpenseModalProps> = ({ expense, isOpen, on
                  <input 
                     type="number" inputMode="decimal"
                     value={amount}
-                    onChange={(e) => setAmount(e.target.value)}
+                    onChange={(e) => { setAmount(e.target.value); if (error) setError(''); }}
+                    aria-invalid={!!error}
                     className="w-full bg-white border border-slate-200 rounded-xl min-h-[48px] pl-9 pr-3.5 text-base font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus-visible:ring-2 focus-visible:ring-emerald-500"
                  />
             </div>
+            {error && <p className="text-xs text-rose-600 mt-1.5">{error}</p>}
           </div>
           
           <div>
@@ -125,9 +138,9 @@ const EditExpenseModal: React.FC<EditExpenseModalProps> = ({ expense, isOpen, on
           )}
         </div>
 
-        <button onClick={handleUpdate} className="w-full min-h-[48px] rounded-xl text-sm font-semibold text-white bg-emerald-600 active:scale-95 flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
+        <button onClick={handleUpdate} disabled={isSaving} className="w-full min-h-[48px] rounded-xl text-sm font-semibold text-white bg-emerald-600 active:scale-95 flex items-center justify-center gap-2 hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:active:scale-100 focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2">
           <CheckCircle2 size={20} />
-          <span>{'Update'}</span>
+          <span>{isSaving ? 'Saving…' : 'Update'}</span>
         </button>
         </div>
       </div>

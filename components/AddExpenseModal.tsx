@@ -5,8 +5,11 @@ import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
 import { getCategoryIcon, parseCategoryColor } from '../utils/categoryIcons';
-import { X, Delete, Check, Users } from 'lucide-react';
+import { X, Delete, Check, Users, Loader2 } from 'lucide-react';
 import { format } from 'date-fns';
+import { todayISO } from '../utils/date';
+import { buildMemberNameMap, memberNameFrom } from '../utils/memberNames';
+import ConfirmDialog from './ConfirmDialog';
 
 interface AddExpenseModalProps {
   category: Category;
@@ -19,12 +22,17 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
   const { user } = useAuth();
   const [amount, setAmount] = useState('0');
   const [amountError, setAmountError] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  // Hard reentry guard. State alone is not enough: two taps can land before React
+  // commits the re-render, and each one would create its own expense document.
+  const submittingRef = useRef(false);
   const [note, setNote] = useState('');
   const [selectedDate, setSelectedDate] = useState<Date>(new Date());
   const [isSplitMode, setIsSplitMode] = useState(false);
   const [selectedMembers, setSelectedMembers] = useState<string[]>([]);
   const [paidBy, setPaidBy] = useState<string>('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
   const modalRef = React.useRef<HTMLDivElement>(null);
   
   const currencySymbol = getCurrencySymbol();
@@ -34,13 +42,15 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
     return activeWallet && !activeWallet.isPersonal && activeWallet.members.length > 1;
   }, [activeWallet]);
   
-  // Get member names from expenses (fallback to user ID if not found)
-  const getMemberName = useCallback((userId: string): string => {
-    if (userId === user?.id) return user.name;
-    const expense = expenses.find(e => e.createdBy.uid === userId);
-    if (expense) return expense.createdBy.name;
-    return `Member ${userId.substring(0, 4)}`;
-  }, [user, expenses]);
+  const memberNames = useMemo(
+    () => buildMemberNameMap(activeWallet, expenses, user?.id, user?.name),
+    [activeWallet, expenses, user]
+  );
+
+  const getMemberName = useCallback(
+    (userId: string): string => memberNameFrom(memberNames, userId),
+    [memberNames]
+  );
   
   // Available members for splitting
   const availableMembers = useMemo(() => {
@@ -93,6 +103,25 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
     };
   }, [isOpen]);
 
+  // A native date input emits '' when the user clears it, and `new Date('')` is an
+  // Invalid Date that makes format() throw during render — which takes the whole app
+  // down to the ErrorBoundary. Reject anything unparseable and keep the current date.
+  // Parsing is done field-by-field because `new Date('2026-08-09')` is UTC midnight,
+  // which resolves to the previous day in any negative UTC offset.
+  const handleDateChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const raw = e.target.value;
+    if (!raw) return;
+    const [y, m, d] = raw.split('-').map(Number);
+    if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return;
+    if (y < 2000 || y > 2100) return;
+    const parsed = new Date(y, m - 1, d);
+    if (Number.isNaN(parsed.getTime())) return;
+    // Date() rolls impossible dates forward (Feb 30 becomes Mar 2), so confirm the
+    // parts survived the round trip rather than silently storing a different day.
+    if (parsed.getFullYear() !== y || parsed.getMonth() !== m - 1 || parsed.getDate() !== d) return;
+    setSelectedDate(parsed);
+  }, []);
+
   const hasUnsavedData = useMemo(() => {
     return amount !== '0' || note.trim().length > 0;
   }, [amount, note]);
@@ -108,12 +137,21 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
   }, []);
 
   const safeClose = useCallback(() => {
+    // Native window.confirm is styled by the browser, is suppressible, and looks
+    // nothing like the rest of the app. Use the shared dialog instead.
     if (hasUnsavedData) {
-      if (!window.confirm('Discard this expense? Changes will be lost.')) return;
+      setShowDiscardConfirm(true);
+      return;
     }
     onClose();
     resetForm();
   }, [hasUnsavedData, onClose, resetForm]);
+
+  const confirmDiscard = useCallback(() => {
+    setShowDiscardConfirm(false);
+    onClose();
+    resetForm();
+  }, [onClose, resetForm]);
 
   const submitAndClose = useCallback(() => {
     onClose();
@@ -155,7 +193,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
     return () => window.removeEventListener('keydown', handler);
   }, [isOpen]);
 
-  useFocusTrap(modalRef, isOpen);
+  useFocusTrap(modalRef, isOpen, safeClose);
 
   if (!isOpen) return null;
 
@@ -172,7 +210,8 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
     // Cap total digit count (excludes the decimal point)
     if (amount.replace('.', '').length >= 9) return;
     if (amount === '0') {
-      setAmount(num);
+      // '00' on a zero amount would otherwise display the literal "00".
+      setAmount(num === '00' ? '0' : num);
     } else {
       setAmount(prev => prev + num);
     }
@@ -197,12 +236,20 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
       amount: number;
     }> = [];
     
-    const perPerson = total / selectedMembers.length;
+    // Split in whole cents and hand the remainder out one cent at a time, so the
+    // shares always add back up to the total exactly.
+    const totalCents = Math.round(total * 100);
+    const n = selectedMembers.length;
+    const baseCents = Math.floor(totalCents / n);
+    let remainder = totalCents - baseCents * n;
+
     selectedMembers.forEach(memberId => {
+      const cents = baseCents + (remainder > 0 ? 1 : 0);
+      if (remainder > 0) remainder -= 1;
       participants.push({
         userId: memberId,
         userName: getMemberName(memberId),
-        amount: perPerson
+        amount: cents / 100
       });
     });
     
@@ -210,26 +257,35 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
   }, [amount, isSplitMode, selectedMembers, getMemberName]);
   
   const handleSubmit = async () => {
-    const val = parseFloat(amount);
-    if (val > 0) {
-      let splitDetails: SplitDetails | undefined;
-      
-      if (isSplitMode && calculateSplitAmounts && paidBy) {
-        splitDetails = {
-          splitType: 'equal',
-          participants: calculateSplitAmounts,
-          paidBy
-        };
-      }
+    if (submittingRef.current) return;
 
-      try {
-        await addExpense(val, category, note, selectedDate, splitDetails);
-        submitAndClose();
-      } catch {
-        // Error notification is shown by StoreContext
-      }
-    } else {
+    const val = parseFloat(amount);
+    if (!(val > 0)) {
       setAmountError(true);
+      return;
+    }
+
+    let splitDetails: SplitDetails | undefined;
+    if (isSplitMode && calculateSplitAmounts && paidBy) {
+      splitDetails = {
+        splitType: 'equal',
+        participants: calculateSplitAmounts,
+        paidBy
+      };
+    }
+
+    submittingRef.current = true;
+    setIsSubmitting(true);
+    try {
+      await addExpense(val, category, note, selectedDate, splitDetails);
+      submittingRef.current = false;
+      setIsSubmitting(false);
+      submitAndClose();
+    } catch {
+      // StoreContext already showed the error toast. Stay open so the amount and
+      // note survive and the user can retry instead of retyping everything.
+      submittingRef.current = false;
+      setIsSubmitting(false);
     }
   };
   
@@ -285,8 +341,10 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
           <div className="flex gap-2">
             <input
               type="date"
+              aria-label="Expense date"
               value={format(selectedDate, 'yyyy-MM-dd')}
-              onChange={(e) => setSelectedDate(new Date(e.target.value))}
+              max={todayISO()}
+              onChange={handleDateChange}
               className="px-3 py-1.5 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
             <button 
@@ -303,8 +361,10 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
          <div className="flex flex-col">
             <div className="relative mb-1.5">
                 <span className="text-lg font-medium absolute left-3 top-1/2 -translate-y-1/2 text-rose-400">{currencySymbol}</span>
-                <input 
+                <input
                     readOnly
+                    aria-label={`Amount, ${currencySymbol}${amount}`}
+                    aria-live="polite"
                     value={amount}
                     className={`w-full text-right text-3xl font-bold bg-white border rounded-xl p-3 pr-10 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 ${amountError ? 'border-rose-400' : 'border-slate-300'} ${themeText}`}
                 />
@@ -436,11 +496,15 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
                 <KeypadButton key={num} onClick={() => handleNumClick(num.toString())}>{num}</KeypadButton>
             ))}
             <div className="row-span-2">
-                 <button 
+                 <button
                     onClick={handleSubmit}
-                    className={`w-full h-full text-white rounded-lg font-bold text-lg active:scale-95 flex items-center justify-center hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 ${themeBg}`}
+                    disabled={isSubmitting}
+                    aria-label={isSubmitting ? 'Saving expense' : 'Save expense'}
+                    className={`w-full h-full text-white rounded-lg font-bold text-lg active:scale-95 flex items-center justify-center hover:bg-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:opacity-60 disabled:active:scale-100 ${themeBg}`}
                 >
-                    <Check size={24} strokeWidth={3} />
+                    {isSubmitting
+                      ? <Loader2 size={24} strokeWidth={3} className="animate-spin" />
+                      : <Check size={24} strokeWidth={3} />}
                 </button>
             </div>
 
@@ -453,6 +517,17 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
             <KeypadButton onClick={() => handleNumClick('00')}>00</KeypadButton>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={showDiscardConfirm}
+        title="Discard this expense?"
+        message="The amount and note you typed will be lost."
+        confirmLabel="Discard"
+        cancelLabel="Keep editing"
+        destructive
+        onConfirm={confirmDiscard}
+        onCancel={() => setShowDiscardConfirm(false)}
+      />
     </div>
   );
 };

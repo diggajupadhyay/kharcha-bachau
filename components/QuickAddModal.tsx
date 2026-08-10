@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useCallback } from 'react';
 import { useStore } from '../context/StoreContext';
 import { useFocusTrap } from '../hooks/useFocusTrap';
 import { X, Search } from 'lucide-react';
@@ -27,7 +27,14 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
 
   const [search, setSearch] = useState('');
   const modalRef = useRef<HTMLDivElement>(null);
-  useFocusTrap(modalRef, isOpen);
+
+  const handleClose = useCallback(() => {
+    setSelectedCategory(null);
+    setSearch('');
+    onClose();
+  }, [onClose]);
+
+  useFocusTrap(modalRef, isOpen, handleClose);
 
   const filteredCategories = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -36,12 +43,6 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
   }, [sortedCategories, search]);
 
   if (!isOpen) return null;
-
-  const handleClose = () => {
-    setSelectedCategory(null);
-    setSearch('');
-    onClose();
-  };
 
   const handleCategorySelect = (cat: Category) => {
     setSelectedCategory(cat);
@@ -77,13 +78,13 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
             </div>
             <div className="px-4 sm:px-6 pt-3 pb-1 flex-shrink-0">
               <div className="relative">
-                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
                 <input
                   type="text"
                   value={search}
                   onChange={e => setSearch(e.target.value)}
                   placeholder="Search categories"
-                  className="w-full min-h-[44px] pl-9 pr-3 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                  className="w-full min-h-[44px] pl-9 pr-3 bg-slate-50 border border-slate-300 rounded-xl text-sm text-slate-700 placeholder:text-slate-500 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                   aria-label="Search categories"
                 />
               </div>
@@ -111,7 +112,7 @@ const QuickAddModal: React.FC<QuickAddModalProps> = ({ isOpen, onClose }) => {
                 ))}
               </div>
               {search.trim() && filteredCategories.length === 0 && (
-                <p className="text-center text-sm text-slate-400 py-8">No categories match "{search}"</p>
+                <p className="text-center text-sm text-slate-500 py-8">No categories match "{search}"</p>
               )}
             </div>
           </div>

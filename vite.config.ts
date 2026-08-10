@@ -3,8 +3,14 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
 import { fileURLToPath, URL } from 'url';
+import pkg from './package.json';
 
 export default defineConfig({
+  // Single source of truth for the version string: package.json. It previously
+  // appeared, differently, in package.json, SettingsPage and backupService.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   plugins: [
     react(),
     tailwindcss(),
@@ -117,21 +123,6 @@ export default defineConfig({
 
             if (id.includes('date-fns')) {
               return 'vendor-date-fns';
-            }
-
-            if (
-              id.includes('jspdf') ||
-              id.includes('html2canvas') ||
-              id.includes('canvg') ||
-              id.includes('dompurify') ||
-              id.includes('stackblur-canvas') ||
-              id.includes('fast-png') ||
-              id.includes('svg-pathdata') ||
-              id.includes('rgbcolor') ||
-              id.includes('iobuffer') ||
-              id.includes('performance-now')
-            ) {
-              return undefined;
             }
 
             return 'vendor';
