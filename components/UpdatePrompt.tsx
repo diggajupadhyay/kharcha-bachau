@@ -16,7 +16,7 @@ const UpdatePrompt: React.FC<UpdatePromptProps> = ({ needRefresh, updateServiceW
 
   return (
     <div
-      className="fixed bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4 animate-slide-up-bottom"
+      className="absolute bottom-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4 animate-slide-up-bottom"
       style={{ paddingBottom: 'env(safe-area-inset-bottom, 0px)' }}
     >
       <div className="bg-[#0E1833] text-white rounded-xl shadow-2xl border border-white/10 p-4 flex items-center gap-3">

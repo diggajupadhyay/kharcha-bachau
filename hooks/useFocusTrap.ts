@@ -68,7 +68,12 @@ export function useFocusTrap(
     container.addEventListener('keydown', onKeyDown);
     return () => {
       container.removeEventListener('keydown', onKeyDown);
-      previouslyFocused?.focus?.();
+      // Only restore focus to an element that is still in the document. After a route
+      // change the trigger has been unmounted, and focusing a detached node silently
+      // moves focus to <body> — losing the caret position for keyboard users.
+      if (previouslyFocused && document.contains(previouslyFocused)) {
+        previouslyFocused.focus?.();
+      }
     };
   }, [ref, active]);
 }

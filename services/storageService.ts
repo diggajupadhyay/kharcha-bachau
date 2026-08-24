@@ -49,13 +49,17 @@ export const createGuestWallet = (): Wallet => ({
 
 export const createWallet = async (user: User, walletName: string, isPersonal: boolean = false): Promise<string> => {
     if (user.type === 'guest') throw new Error("Guests cannot create shared wallets");
-    if (walletName.length > 50) throw new Error("Wallet name too long (max 50 characters)");
-    
+    // Trimmed before the length checks: " " passed the old guard and produced a
+    // wallet with a blank name that was impossible to tell apart in the switcher.
+    const name = walletName.trim();
+    if (!name) throw new Error("Give the wallet a name");
+    if (name.length > 50) throw new Error("Wallet name too long (max 50 characters)");
+
     try {
         const newWalletRef = doc(collection(db, 'wallets'));
         const newWallet: Wallet = {
             id: newWalletRef.id,
-            name: walletName,
+            name,
             ownerId: user.id,
             members: [user.id],
             currency: 'Rs.',
@@ -94,9 +98,20 @@ export const getUserWallets = async (user: User): Promise<Wallet[]> => {
     try {
         const q = query(collection(db, 'wallets'), where('members', 'array-contains', user.id));
         const snapshot = await getDocs(q);
-        
-        const wallets = snapshot.docs.map(doc => doc.data() as Wallet);
-        
+
+        // The document id is authoritative, and `members` is read as `.length` all
+        // over the UI. A document written before a field existed, or edited by hand,
+        // used to arrive with them missing and crash the wallet switcher.
+        const wallets = snapshot.docs.map(docSnap => {
+            const data = docSnap.data() as Wallet;
+            return {
+                ...data,
+                id: docSnap.id,
+                name: typeof data.name === 'string' && data.name.length > 0 ? data.name : 'Untitled Wallet',
+                members: Array.isArray(data.members) ? data.members : [user.id],
+            } as Wallet;
+        });
+
         if (import.meta.env.DEV) {
             console.log('Fetched wallets:', wallets.length);
         }
@@ -145,6 +160,11 @@ export const deleteWallet = async (user: User, walletId: string) => {
     if (user.type === 'guest') return;
     
     try {
+        const walletRef = doc(db, 'wallets', walletId);
+        // Read the invite code before the wallet goes, so the orphan can be reaped.
+        const walletSnap = await getDoc(walletRef);
+        const inviteCode = walletSnap.exists() ? walletSnap.data()?.inviteCode : undefined;
+
         const expensesRef = collection(db, 'wallets', walletId, 'expenses');
         const snapshot = await getDocs(expensesRef);
 
@@ -153,7 +173,15 @@ export const deleteWallet = async (user: User, walletId: string) => {
         // leaves a partially emptied wallet. That is recoverable by retrying; the
         // previous single batch simply refused to delete anything at all.
         await deleteDocsInChunks(snapshot.docs.map(docSnap => docSnap.ref));
-        await deleteDoc(doc(db, 'wallets', walletId));
+        await deleteDoc(walletRef);
+
+        // The invite used to be left behind pointing at a wallet that no longer
+        // existed, so the code stayed resolvable and anyone still holding it got
+        // "Wallet not found" on every attempt. Best-effort: the wallet is already
+        // gone, and a stale invite grants access to nothing.
+        if (typeof inviteCode === 'string' && inviteCode.length > 0) {
+            try { await deleteDoc(doc(db, 'invites', inviteCode)); } catch { /* harmless */ }
+        }
 
         if (import.meta.env.DEV) {
             console.log('Wallet deleted successfully:', walletId);
@@ -368,18 +396,26 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
         if (import.meta.env.DEV) {
             console.error('Error generating invite code:', error);
         }
-        
-        if (error.message.includes('unique invite code')) {
+
+        // Firestore errors carry a `code` but not always a `message`. Reading
+        // `.message.includes` unguarded threw a TypeError of its own here, replacing
+        // the real failure with "Cannot read properties of undefined".
+        if (typeof error?.message === 'string' && error.message.includes('unique invite code')) {
             throw error;
         }
-        
+
         throw new Error('Failed to generate invite code. Please try again.');
     }
 };
 
 export const joinWalletByCode = async (user: User, code: string): Promise<string> => {
     try {
-        const inviteDocRef = doc(db, 'invites', code.toUpperCase());
+        if (user.type === 'guest') throw new Error("Sign in before joining a shared wallet");
+
+        const normalised = code.trim().toUpperCase();
+        if (!normalised) throw new Error("Invalid invite code");
+
+        const inviteDocRef = doc(db, 'invites', normalised);
         const inviteDoc = await getDoc(inviteDocRef);
         if (!inviteDoc.exists()) {
             throw new Error("Invalid invite code");
@@ -388,6 +424,23 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
         const walletId = inviteDoc.data()?.walletId;
         if (!walletId) {
             throw new Error("Invalid invite data");
+        }
+
+        const existing = await getDoc(doc(db, 'wallets', walletId));
+        // An invite outlives the wallet it points at when the owner deletes it.
+        // "Wallet not found" made that look like an app fault rather than a code
+        // that has simply expired.
+        if (!existing.exists()) {
+            throw new Error("That wallet no longer exists");
+        }
+
+        // The join rule requires the caller not already be in `members`, so a second
+        // attempt is rejected with permission-denied and surfaced as "Permission
+        // denied. Please check your authentication." — which reads like a broken
+        // login rather than "you are already here".
+        const existingMembers = existing.data()?.members;
+        if (Array.isArray(existingMembers) && existingMembers.includes(user.id)) {
+            throw new Error("You are already a member of this wallet");
         }
 
         await updateDoc(doc(db, 'wallets', walletId), {
@@ -414,10 +467,16 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
             console.error('Error joining wallet:', error);
         }
         
-        if (error.message === "Invalid invite code" || error.message === "Invalid invite data") {
+        if (
+            error.message === "Invalid invite code" ||
+            error.message === "Invalid invite data" ||
+            error.message === "You are already a member of this wallet" ||
+            error.message === "That wallet no longer exists" ||
+            error.message === "Sign in before joining a shared wallet"
+        ) {
             throw error;
         }
-        
+
         if (error.code === 'permission-denied') {
             throw new Error('Permission denied. Please check your authentication.');
         } else if (error.code === 'not-found') {
@@ -432,12 +491,29 @@ const getLocalData = (): Expense[] => {
   try {
       const data = localStorage.getItem(GUEST_DATA_KEY);
       if (!data) return [];
-      return JSON.parse(data);
+      const parsed = JSON.parse(data);
+      // A hand-edited or truncated value used to be handed straight to the UI as an
+      // array, where `.filter` on a non-array threw on every single render.
+      return Array.isArray(parsed) ? parsed : [];
   } catch (e) { return []; }
 };
 
 const saveLocalData = (data: Expense[]) => {
   localStorage.setItem(GUEST_DATA_KEY, JSON.stringify(data));
+};
+
+/**
+ * Read-modify-write against local storage in one synchronous step.
+ *
+ * Guest writes replace the whole array, so anything that reads, awaits, then writes
+ * loses whatever landed in between. `addExpense` did exactly that — read the list,
+ * await a timer, write `[...current, new]` — so two taps in quick succession
+ * persisted only the second one.
+ */
+const mutateLocalData = (mutate: (current: Expense[]) => Expense[]): Expense[] => {
+  const next = mutate(getLocalData());
+  saveLocalData(next);
+  return next;
 };
 
 /**
@@ -505,10 +581,8 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
     const newExpense = buildExpenseDocument(expense, user, activeWalletId);
 
     if (user.type === 'guest') {
-        const current = getLocalData();
-        await new Promise(r => setTimeout(r, 10));
-        saveLocalData([...current, newExpense]);
-        
+        mutateLocalData(current => [...current, newExpense]);
+
         if (import.meta.env.DEV) {
             console.log('Expense saved locally (guest mode)');
         }
@@ -547,6 +621,11 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
         if (!Number.isFinite(updates.amount) || updates.amount <= 0) throw new Error("Enter an amount greater than 0");
         if (updates.amount > 1000000000) throw new Error("That amount is too large");
     }
+    // Matches the cap applied on create, and the cap in the security rules. Without
+    // it an over-long edit was rejected server-side as a generic "Failed to update".
+    if (updates.note !== undefined && updates.note.length > 500) {
+        throw new Error("Note too long (max 500 characters)");
+    }
 
     // Validate split sums client-side when both amount and splitDetails are provided
     if (updates.splitDetails !== undefined && updates.amount !== undefined) {
@@ -561,10 +640,8 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
     if (updates.splitDetails !== undefined) allowedUpdates.splitDetails = updates.splitDetails;
 
     if (user.type === 'guest') {
-        const current = getLocalData();
-        const updated = current.map(p => p.id === expenseId ? { ...p, ...allowedUpdates } : p);
-        saveLocalData(updated);
-        
+        mutateLocalData(current => current.map(p => p.id === expenseId ? { ...p, ...allowedUpdates } : p));
+
         if (import.meta.env.DEV) {
             console.log('Expense updated locally (guest mode)');
         }
@@ -622,7 +699,11 @@ export const getCustomCategories = async (user: User): Promise<Category[]> => {
             if (import.meta.env.DEV) {
                 console.error('Error fetching custom categories:', error);
             }
-            return [];
+            // Deliberately throws rather than returning []. saveCustomCategories
+            // writes the whole array, so a failed read that looked like "no custom
+            // categories" meant the next category the user added replaced their
+            // entire saved list with that one entry.
+            throw new Error('Could not load your categories. Please check your connection.');
         }
     }
 };
@@ -661,10 +742,8 @@ export const saveCustomCategories = async (user: User, categories: Category[]): 
 
 export const deleteExpense = async (user: User, activeWalletId: string, expenseId: string) => {
     if (user.type === 'guest') {
-        const current = getLocalData();
-        const filtered = current.filter(p => p.id !== expenseId);
-        saveLocalData(filtered);
-        
+        mutateLocalData(current => current.filter(p => p.id !== expenseId));
+
         if (import.meta.env.DEV) {
             console.log('Expense deleted locally (guest mode)');
         }
@@ -696,30 +775,35 @@ export const deleteExpense = async (user: User, activeWalletId: string, expenseI
 // Re-create a previously deleted expense (used by Undo). Preserves the original id/createdAt.
 export const restoreExpense = async (user: User, activeWalletId: string, expense: Expense) => {
     if (user.type === 'guest') {
-        const current = getLocalData();
-        const exists = current.some(p => p.id === expense.id);
-        saveLocalData(exists ? current : [...current, expense]);
+        mutateLocalData(current => current.some(p => p.id === expense.id) ? current : [...current, expense]);
     } else {
         await setDoc(doc(db, 'wallets', activeWalletId, 'expenses', expense.id), expense);
     }
 };
 
-export const clearAllExpenses = async (user: User, walletId: string) => {
+// `ownOnly` restricts the sweep to expenses this user created. The rules let the
+// wallet owner delete anything but let a plain member delete only their own, and a
+// batch containing one forbidden document is rejected whole — so for a member in
+// somebody else's shared wallet the unscoped version deleted nothing at all and
+// reported a generic failure.
+export const clearAllExpenses = async (user: User, walletId: string, ownOnly = false) => {
     if (user.type === 'guest') {
         saveLocalData([]);
-        
+
         if (import.meta.env.DEV) {
             console.log('All expenses cleared locally (guest mode)');
         }
     } else {
         try {
             const expensesRef = collection(db, 'wallets', walletId, 'expenses');
-            const snapshot = await getDocs(expensesRef);
+            const snapshot = ownOnly
+                ? await getDocs(query(expensesRef, where('createdBy.uid', '==', user.id)))
+                : await getDocs(expensesRef);
 
             await deleteDocsInChunks(snapshot.docs.map(docSnap => docSnap.ref));
 
             if (import.meta.env.DEV) {
-                console.log('All expenses cleared from Firestore:', snapshot.docs.length);
+                console.log('Expenses cleared from Firestore:', snapshot.docs.length);
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -759,7 +843,13 @@ export const subscribeToWalletExpenses = (
             q,
             snapshot => {
                 retries = 0;
-                const expenses = snapshot.docs.map(doc => doc.data() as Expense);
+                // Fall back to the document id. React keys off `expense.id`, and a
+                // row missing it collided with every other row missing it, so those
+                // entries silently overwrote one another in the list.
+                const expenses = snapshot.docs.map(docSnap => {
+                    const data = docSnap.data() as Expense;
+                    return (data.id ? data : { ...data, id: docSnap.id }) as Expense;
+                });
                 callback(expenses);
             },
             (error) => {
@@ -826,11 +916,32 @@ export const ensureMemberProfile = async (user: User, wallet: Wallet): Promise<v
   }
 };
 
+// The security rules validate every field of an expense, and a batch containing one
+// invalid document is rejected whole. A single corrupt row in local storage therefore
+// blocked the entire guest→cloud migration permanently: every retry failed the same
+// way, and the Settings banner just kept saying "not backed up".
+const isMigratableExpense = (e: any): boolean =>
+  !!e && typeof e === 'object' &&
+  typeof e.id === 'string' && e.id.length > 0 &&
+  typeof e.amount === 'number' && Number.isFinite(e.amount) && e.amount > 0 && e.amount <= 1000000000 &&
+  typeof e.date === 'string' && e.date.length === 10 &&
+  typeof e.categoryId === 'string' && e.categoryId.length > 0 &&
+  typeof e.categoryName === 'string' && e.categoryName.length > 0 &&
+  typeof e.categoryEmoji === 'string' && e.categoryEmoji.length > 0 &&
+  typeof e.note === 'string' && e.note.length <= 500 &&
+  typeof e.createdAt === 'number' && Number.isFinite(e.createdAt);
+
 export const syncGuestData = async (user: User) => {
-    const localData = getLocalData();
+    const allLocal = getLocalData();
+    const localData = allLocal.filter(isMigratableExpense);
+    const unmigratable = allLocal.length - localData.length;
+
     if (localData.length === 0) {
+        // Nothing usable. Drop damaged leftovers rather than leaving the "not backed
+        // up" banner permanently stuck on rows that can never be written.
+        if (unmigratable > 0) localStorage.removeItem(GUEST_DATA_KEY);
         if (import.meta.env.DEV) {
-            console.log('No guest data to sync');
+            console.log('No guest data to sync', unmigratable ? `(${unmigratable} unusable rows dropped)` : '');
         }
         return;
     }

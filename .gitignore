@@ -33,3 +33,9 @@ dist-ssr
 
 # Firebase deploy artifacts
 .firebase/
+firestore-debug.log
+firebase-debug.log
+
+# Locally generated user data — exports and backups land in the working directory
+kharcha_bachau_backup_*.json
+kharcha_bachau_export_*.csv

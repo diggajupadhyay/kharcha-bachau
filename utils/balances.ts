@@ -42,7 +42,11 @@ export function calculateMemberBalances(
       if (!settlement) {
         balances[participant.userId] -= participant.amount;
       } else {
-        balances[paidBy] -= settlement.amount;
+        // Cancel the payer's credit by the *current* share, not by the amount
+        // recorded on the settlement. Editing an expense after it was settled left
+        // the two different, and the books then never returned to zero: the
+        // difference stayed on the payer's balance permanently.
+        balances[paidBy] -= participant.amount;
       }
     }
   }

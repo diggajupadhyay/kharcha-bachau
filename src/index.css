@@ -45,6 +45,8 @@ body {
   font-family: 'Plus Jakarta Sans', sans-serif;
   -webkit-tap-highlight-color: transparent;
   overscroll-behavior-y: none;
+  /* Slightly larger base size: friendlier for young children and seniors */
+  font-size: 17px;
 }
 
 #root {
@@ -146,6 +148,104 @@ input[type='number']::-webkit-outer-spin-button {
 .text-clamp-xl { font-size: clamp(1.25rem, 4vw, 1.5rem); }
 .text-clamp-2xl { font-size: clamp(1.5rem, 5vw, 2rem); }
 .text-clamp-3xl { font-size: clamp(1.875rem, 6vw, 2.5rem); }
+
+/* Design system tokens */
+:root {
+  --radius-card: 1.25rem;
+  --radius-input: 0.875rem;
+  --radius-button: 0.875rem;
+  --space-page: 1.25rem;
+  --space-section: 1.5rem;
+  /* Large tap targets: usable by children and seniors alike */
+  --touch-target: 56px;
+  --app-min-tap-target: 48px;
+}
+
+/* Everything below lives in the `components` layer so that a Tailwind utility on the
+   same element wins. Unlayered, `.input`'s own padding beat `pl-9` and the `Rs.`
+   prefix ended up underneath the typed amount; `.btn-danger`'s `justify-content:
+   center` beat `justify-start`; `.text-caption`'s colour beat `text-emerald-600`. */
+@layer components {
+
+/* Typography scale — sized up and darkened for readability at any age */
+.text-display { font-size: clamp(2rem, 6vw, 2.75rem); font-weight: 800; letter-spacing: -0.02em; }
+.text-heading { font-size: clamp(1.25rem, 4vw, 1.625rem); font-weight: 700; letter-spacing: -0.01em; }
+.text-subhead { font-size: 1rem; font-weight: 600; color: #334155; }
+.text-caption { font-size: 0.9375rem; font-weight: 500; color: #475569; }
+
+/* Card system */
+.card {
+  background: white;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-card);
+  padding: var(--space-section);
+  box-shadow: 0 1px 2px rgba(0,0,0,0.04);
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.card:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.06); }
+.card-interactive { cursor: pointer; }
+.card-interactive:active { transform: scale(0.98); }
+
+/* Button system */
+.btn-primary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: var(--touch-target); padding: 0.875rem 1.75rem;
+  background: #059669; color: white; font-weight: 700; font-size: 1.0625rem;
+  border: none; border-radius: var(--radius-button); cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.btn-primary:hover { background: #047857; }
+.btn-primary:active { transform: scale(0.97); }
+.btn-primary:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+
+.btn-secondary {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: var(--touch-target); padding: 0.875rem 1.75rem;
+  background: white; color: #0f172a; font-weight: 700; font-size: 1.0625rem;
+  border: 1px solid #cbd5e1; border-radius: var(--radius-button); cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.btn-secondary:hover { background: #f8fafc; border-color: #94a3b8; }
+.btn-secondary:active { transform: scale(0.97); }
+
+.btn-danger {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem;
+  min-height: var(--touch-target); padding: 0.875rem 1.75rem;
+  background: #fef2f2; color: #be123c; font-weight: 700; font-size: 1.0625rem;
+  border: 1px solid #fda4af; border-radius: var(--radius-button); cursor: pointer;
+  transition: background 0.15s, transform 0.1s;
+}
+.btn-danger:hover { background: #fee2e2; }
+.btn-danger:active { transform: scale(0.97); }
+
+/* Input system */
+.input {
+  width: 100%; min-height: var(--touch-target); padding: 1rem 1.125rem;
+  background: white; border: 2px solid #cbd5e1; border-radius: var(--radius-input);
+  font-size: 1.125rem; font-weight: 500; color: #0f172a;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.input:focus { outline: none; border-color: #059669; box-shadow: 0 0 0 4px rgba(5,150,105,0.15); }
+.input::placeholder { color: #64748b; font-weight: 400; }
+
+/* Section spacing */
+.section { margin-bottom: var(--space-section); }
+.section-title {
+  font-size: 0.875rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: #475569; margin-bottom: 0.75rem;
+}
+
+/* Screen reader only */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+}
+
+/* Currency prefix on a large amount: opts out of the display scale's negative
+   tracking, which pulled the number up against the `Rs.` */
+.amount-symbol { letter-spacing: normal; }
+
+}
 
 /* Explicit z-index scale for overlays (modals, dialogs, notifications) */
 @utility z-modal { z-index: 140; }

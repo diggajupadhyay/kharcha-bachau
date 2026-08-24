@@ -5,6 +5,14 @@ import { ArrowLeft } from 'lucide-react';
 const Privacy: React.FC = () => {
   const navigate = useNavigate();
 
+  // navigate(-1) walks the browser history, which leaves the app entirely when
+  // /privacy is the entry point — someone opening the policy link from outside had
+  // their only "back" button take them off the site.
+  const goBack = () => {
+    if (window.history.length > 1) navigate(-1);
+    else navigate('/', { replace: true });
+  };
+
   return (
     <div
       className="min-h-full bg-slate-50 overflow-x-hidden"
@@ -18,7 +26,7 @@ const Privacy: React.FC = () => {
       <div className="pt-3 px-3 md:px-5 lg:px-6 max-w-2xl mx-auto">
         <div className="mb-5 flex items-center gap-3">
           <button
-            onClick={() => navigate(-1)}
+            onClick={goBack}
             className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-white border border-slate-200 active:scale-95 hover:bg-slate-100 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
             aria-label="Go back"
           >

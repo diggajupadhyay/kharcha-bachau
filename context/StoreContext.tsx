@@ -6,6 +6,7 @@ import { useAuth } from './AuthContext';
 import { format } from 'date-fns';
 import { EXPENSE_CATEGORIES } from '../constants';
 import { calculateMemberBalances } from '../utils/balances';
+import { useCurrentDate } from '../hooks/useCurrentDate';
 
 const StoreContext = createContext<StoreContextType | undefined>(undefined);
 
@@ -78,6 +79,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [budget, setBudgetState] = useState(storage.DEFAULT_BUDGET);
   const [customCategories, setCustomCategoriesState] = useState<Category[]>([]);
+  // False until the saved list has actually been read back. See the loader below.
+  const [categoriesLoaded, setCategoriesLoaded] = useState(false);
   const [isSyncing, setIsSyncing] = useState(true);
   // Expenses left behind on this device by a migration that did not finish.
   const [pendingGuestExpenses, setPendingGuestExpenses] = useState(0);
@@ -87,13 +90,20 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       currentMonthSpending: 0
   });
 
+  // Keyed on the wallet *id*, not the wallet object: every refreshWallets() produces
+  // fresh objects, which re-ran this on each mutation. And guarded against a stale
+  // resolve — two overlapping loads could land out of order and leave the previous
+  // wallet's budget on screen.
+  const activeWalletId = activeWallet?.id;
   useEffect(() => {
+    let cancelled = false;
     const loadBudget = async () => {
-      const saved = await storage.getStoredBudget(user, activeWallet?.id);
-      setBudgetState(saved);
+      const saved = await storage.getStoredBudget(user, activeWalletId);
+      if (!cancelled) setBudgetState(saved);
     };
     loadBudget();
-  }, [user, activeWallet]);
+    return () => { cancelled = true; };
+  }, [user, activeWalletId]);
 
   const setBudget = useCallback((amount: number) => {
       setBudgetState(amount);
@@ -110,10 +120,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // Notification/haptic helpers — declared ahead of every effect that lists them as a
   // dependency, since a dep array is evaluated during render and would otherwise hit
   // the temporal dead zone.
+  // Auto-dismiss timers are tracked so they can be cleared on unmount; they used to
+  // be fired and forgotten, leaving stray timers running after navigation.
+  const toastTimersRef = useRef<Set<ReturnType<typeof setTimeout>>>(new Set());
+  useEffect(() => () => {
+    toastTimersRef.current.forEach(clearTimeout);
+    toastTimersRef.current.clear();
+  }, []);
+
+  // Toasts are stacked vertically from the top of the screen with nothing capping
+  // them. A burst — a failing import skipping rows one at a time, say — buried the
+  // entire UI under a column of cards. Oldest are dropped past this many.
+  const MAX_VISIBLE_TOASTS = 3;
+
   const showNotification = useCallback((type: NotificationType, message: string) => {
     const id = Math.random().toString(36).substring(2, 11);
-    setNotifications(prev => [...prev, { id, type, message }]);
-    setTimeout(() => setNotifications(prev => prev.filter(n => n.id !== id)), 3000);
+    setNotifications(prev => [...prev, { id, type, message }].slice(-MAX_VISIBLE_TOASTS));
+    const timer = setTimeout(() => {
+      toastTimersRef.current.delete(timer);
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 3000);
+    toastTimersRef.current.add(timer);
   }, []);
 
   const dismissNotification = useCallback((id: string) => {
@@ -251,8 +278,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   }, [user, showNotification]);
 
+  // Depends on the wallet id rather than the wallet object. Keyed on the object, any
+  // wallet-list refresh tore the Firestore listener down and re-established it,
+  // re-downloading the whole expense list and flashing the sync skeleton.
   useEffect(() => {
-      if (!user || !activeWallet) {
+      if (!user || !activeWalletId) {
           setExpenses([]);
           setIsSyncing(false);
           return;
@@ -269,7 +299,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           setIsSyncing(true);
           const hasReceivedData = { current: false };
           const unsubscribe = storage.subscribeToWalletExpenses(
-            activeWallet.id,
+            activeWalletId,
             (data) => {
               hasReceivedData.current = true;
               setExpenses(data);
@@ -284,15 +314,17 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           );
           return () => unsubscribe();
       }
-  }, [user, activeWallet, showNotification]);
+  }, [user, activeWalletId, showNotification]);
+
+  // The month window has to be a dependency, not a value read once inside the effect.
+  // Keyed on `expenses` alone, an app left open across midnight on the 1st kept
+  // totalling the previous month until the user happened to add an expense.
+  const currentDay = useCurrentDate();
 
   useEffect(() => {
-      const now = new Date();
-      const y = now.getFullYear();
-      const m = now.getMonth();
-
-      const monthStartStr = isoMonthStart(y, m);
-      const monthEndStr = isoMonthEnd(y, m);
+      const [y, m] = currentDay.split('-').map(Number);
+      const monthStartStr = isoMonthStart(y, m - 1);
+      const monthEndStr = isoMonthEnd(y, m - 1);
 
       let currentMonthExpense = 0;
 
@@ -307,7 +339,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           currentMonthSpending: Math.round(currentMonthExpense * 100) / 100,
       });
 
-    }, [expenses]);
+    }, [expenses, currentDay]);
 
   const switchWallet = useCallback((walletId: string) => {
       const wallet = wallets.find(w => w.id === walletId);
@@ -331,9 +363,12 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const createNewWallet = useCallback(async (name: string, isPersonal: boolean = false) => {
       if (!user || user.type === 'guest') return;
       try {
-          await storage.createWallet(user, name, isPersonal);
+          // Match on the id createWallet returns, not on the name. Two wallets are
+          // allowed to share a name, and matching by name switched the user into
+          // whichever one the query happened to return first — usually the old one.
+          const newWalletId = await storage.createWallet(user, name, isPersonal);
           const updatedWallets = await refreshWallets();
-          const newWallet = updatedWallets?.find(w => w.name === name);
+          const newWallet = updatedWallets?.find(w => w.id === newWalletId);
           if (newWallet) setActiveWallet(newWallet);
           showNotification('success', 'New Wallet Created');
       } catch (e: any) {
@@ -359,7 +394,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           }
           throw e;
       }
-  }, [user, showNotification]);
+  }, [user, showNotification, refreshWallets]);
 
   const leaveWallet = useCallback(async (walletId: string) => {
       if (!user || user.type === 'guest') return;
@@ -368,7 +403,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const updatedWallets = await refreshWallets();
           if (updatedWallets) {
               if (updatedWallets.length > 0) {
-                  setActiveWallet(updatedWallets[0]);
+                  // Land on the personal wallet rather than whatever the query
+                  // returned first, which could be another shared wallet.
+                  setActiveWallet(updatedWallets.find(w => w.isPersonal) || updatedWallets[0]);
               } else {
                   // Safety: If no wallets left, recreate personal wallet
                   await createNewWallet('Personal Wallet', true);
@@ -391,7 +428,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           const updatedWallets = await refreshWallets();
           if (updatedWallets) {
               if (updatedWallets.length > 0) {
-                  setActiveWallet(updatedWallets[0]);
+                  setActiveWallet(updatedWallets.find(w => w.isPersonal) || updatedWallets[0]);
               } else {
                   // Safety: If no wallets left, recreate personal wallet
                   await createNewWallet('Personal Wallet', true);
@@ -470,6 +507,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (import.meta.env.DEV) {
             console.error('Error updating expense:', e);
         }
+        // Rethrow so the edit sheet stays open. Resolving on failure made the modal
+        // close over an error toast, silently discarding the user's correction.
+        throw e;
     }
   }, [user, activeWallet, expenses, showNotification, triggerHaptic]);
 
@@ -507,25 +547,38 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return calculateMemberBalances(activeWallet, expenses);
   }, [activeWallet, expenses]);
 
-  // Load custom categories from Firestore/localStorage
+  // Load custom categories from Firestore/localStorage.
+  //
+  // `categoriesLoaded` gates every write. saveCustomCategories persists the whole
+  // array, so acting on a list that never loaded (offline, denied) would replace the
+  // user's real categories with whatever the empty in-memory list plus their one new
+  // entry happened to be.
   useEffect(() => {
     if (!user) {
       setCustomCategoriesState([]);
+      setCategoriesLoaded(false);
       return;
     }
-    
+
+    let cancelled = false;
+    setCategoriesLoaded(false);
     const loadCategories = async () => {
       try {
         const categories = await storage.getCustomCategories(user);
-        setCustomCategoriesState(categories);
+        if (cancelled) return;
+        setCustomCategoriesState(Array.isArray(categories) ? categories : []);
+        setCategoriesLoaded(true);
       } catch (error) {
+        if (cancelled) return;
+        setCustomCategoriesState([]);
         if (import.meta.env.DEV) {
           console.error('Error loading custom categories:', error);
         }
       }
     };
-    
+
     loadCategories();
+    return () => { cancelled = true; };
   }, [user]);
 
   // Save custom categories to Firestore/localStorage
@@ -555,6 +608,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const addCustomCategory = useCallback(async (category: Category) => {
     if (!user) return;
     
+    if (!categoriesLoaded) {
+      showNotification('error', 'Your categories are still loading. Please try again in a moment.');
+      return;
+    }
+
     // Validate category
     if (!category.id || !category.name || !category.emoji) {
       showNotification('error', 'Invalid category data');
@@ -567,6 +625,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     
+    const previous = customCategories;
     try {
       const updatedCategories = [...customCategories, category];
       setCustomCategoriesState(updatedCategories);
@@ -574,16 +633,25 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showNotification('success', 'Category added');
       triggerHaptic();
     } catch (error: any) {
+      // Roll the optimistic update back. Leaving it applied showed a category that
+      // was never persisted, which then vanished on the next reload.
+      setCustomCategoriesState(previous);
       showNotification('error', error.message || 'Failed to save category');
       if (import.meta.env.DEV) {
         console.error('Error adding category:', error);
       }
+      throw error;
     }
-  }, [user, customCategories, showNotification, triggerHaptic]);
+  }, [user, customCategories, categoriesLoaded, showNotification, triggerHaptic]);
 
   const updateCustomCategory = useCallback(async (categoryId: string, updates: Partial<Category>) => {
     if (!user) return;
     
+    if (!categoriesLoaded) {
+      showNotification('error', 'Your categories are still loading. Please try again in a moment.');
+      return;
+    }
+
     const category = customCategories.find(c => c.id === categoryId);
     if (!category) {
       showNotification('error', 'Category not found');
@@ -596,8 +664,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       return;
     }
     
+    const previous = customCategories;
     try {
-      const updatedCategories = customCategories.map(c => 
+      const updatedCategories = customCategories.map(c =>
         c.id === categoryId ? { ...c, ...updates } : c
       );
       setCustomCategoriesState(updatedCategories);
@@ -605,29 +674,37 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showNotification('success', 'Category updated');
       triggerHaptic();
     } catch (error: any) {
+      setCustomCategoriesState(previous);
       showNotification('error', error.message || 'Failed to update category');
       if (import.meta.env.DEV) {
         console.error('Error updating category:', error);
       }
+      throw error;
     }
-  }, [user, customCategories, showNotification, triggerHaptic]);
+  }, [user, customCategories, categoriesLoaded, showNotification, triggerHaptic]);
 
   const deleteCustomCategory = useCallback(async (categoryId: string) => {
     if (!user) return;
     
+    if (!categoriesLoaded) {
+      showNotification('error', 'Your categories are still loading. Please try again in a moment.');
+      return;
+    }
+
     // Can't delete default categories
     if (EXPENSE_CATEGORIES.find(c => c.id === categoryId)) {
       showNotification('error', 'Cannot delete default categories');
       return;
     }
-    
+
     // Check if category is used in expenses
     const isUsed = expenses.some(e => e.categoryId === categoryId);
     if (isUsed) {
       showNotification('error', 'Cannot delete category that is used in expenses');
       return;
     }
-    
+
+    const previous = customCategories;
     try {
       const updatedCategories = customCategories.filter(c => c.id !== categoryId);
       setCustomCategoriesState(updatedCategories);
@@ -635,27 +712,27 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       showNotification('success', 'Category deleted');
       triggerHaptic();
     } catch (error: any) {
+      setCustomCategoriesState(previous);
       showNotification('error', error.message || 'Failed to delete category');
       if (import.meta.env.DEV) {
         console.error('Error deleting category:', error);
       }
+      throw error;
     }
-  }, [user, customCategories, expenses, showNotification, triggerHaptic]);
+  }, [user, customCategories, categoriesLoaded, expenses, showNotification, triggerHaptic]);
 
   const markSettlement = useCallback(async (expenseId: string, fromUserId: string, toUserId: string) => {
     if (!user || !activeWallet) return;
     try {
         const expense = expenses.find(e => e.id === expenseId);
         if (!expense || !expense.splitDetails) {
-          showNotification('error', 'Expense not found or not split');
-          return;
+          throw new Error('Expense not found or not split');
         }
-        
+
         // Find the debt amount
         const participant = expense.splitDetails.participants.find(p => p.userId === fromUserId);
         if (!participant || participant.amount <= 0) {
-          showNotification('error', 'Invalid settlement');
-          return;
+          throw new Error('Invalid settlement');
         }
         
         // Check if already settled
@@ -700,6 +777,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (import.meta.env.DEV) {
             console.error('Error marking settlement:', e);
         }
+        // Rethrow so the caller can tell a real settlement from a failed one. Balance
+        // Summary used to show "Settled" with an Undo button even when every write
+        // had been rejected.
+        throw e;
     }
   }, [user, activeWallet, expenses, showNotification, triggerHaptic, setExpenses]);
 

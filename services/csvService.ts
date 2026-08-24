@@ -26,10 +26,13 @@ export const generateCSVExport = (expenses: Expense[]): void => {
         const createdAt = Number.isFinite(expense.createdAt)
             ? format(new Date(expense.createdAt), 'yyyy-MM-dd HH:mm:ss')
             : '';
+        // `.toFixed` on a non-number throws, and one corrupt row used to abort the
+        // whole export with a bare "Failed to export CSV".
+        const amount = Number.isFinite(expense.amount) ? expense.amount.toFixed(2) : '';
         return [
             cell(expense.date),
-            cell(`${expense.categoryEmoji} ${expense.categoryName}`),
-            cell(expense.amount.toFixed(2)),
+            cell(`${expense.categoryEmoji ?? ''} ${expense.categoryName ?? ''}`.trim()),
+            cell(amount),
             cell(expense.note || ''),
             cell(expense.createdBy?.name || 'Guest'),
             cell(createdAt)

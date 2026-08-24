@@ -31,7 +31,10 @@ export const exportBackup = (
     userId,
     data: {
       expenses,
-      wallets,
+      // `memberProfiles` maps other people's uids to their real names. A backup file
+      // gets emailed around and attached to support threads; nobody else's identity
+      // belongs in it, and nothing on restore reads the field.
+      wallets: wallets.map(({ memberProfiles: _ignored, ...rest }) => rest),
       budget,
       customCategories
     }
@@ -114,25 +117,30 @@ export const sanitizeBackupExpenses = (
 /**
  * Import backup from JSON file
  */
+// Refused before a byte is read. The size test used to run *after* the file had been
+// loaded into a string and JSON.parsed, which is exactly the part that freezes the
+// tab — by then the damage was done and all it did was log a warning.
+const MAX_BACKUP_BYTES = 25 * 1024 * 1024;
+
 export const importBackup = async (file: File): Promise<BackupData> => {
   return new Promise((resolve, reject) => {
+    if (file.size > MAX_BACKUP_BYTES) {
+      reject(new Error('That backup file is too large to open (over 25 MB).'));
+      return;
+    }
+
     const reader = new FileReader();
-    
+
     reader.onload = (e) => {
       try {
         const text = e.target?.result as string;
         const data = JSON.parse(text);
-        
+
         if (!validateBackup(data)) {
           reject(new Error('Invalid backup file format'));
           return;
         }
-        
-        // Check file size (warn if > 10MB)
-        if (file.size > 10 * 1024 * 1024) {
-          console.warn('Backup file is large (>10MB). Import may take a while.');
-        }
-        
+
         resolve(data);
       } catch (error) {
         reject(new Error('Failed to parse backup file. Please ensure it is a valid JSON file.'));

@@ -349,8 +349,18 @@ service cloud.firestore {
                        request.resource.data.walletId is string && request.resource.data.walletId.size() > 0 &&
                        request.resource.data.createdAt is number;
       
-      // Prevent updates and deletes (invites are immutable once created)
-      allow update, delete: if false;
+      // Invites are immutable: an update could repoint a code that other people
+      // already hold at a different wallet.
+      allow update: if false;
+
+      // Deletion is permitted only once the wallet the code points at is gone.
+      // Wallet deletion used to strand its invite forever — the code stayed
+      // resolvable, so anyone still holding it got "Wallet not found" instead of
+      // "this invite is no longer valid", and the code could never be recycled.
+      // A dangling invite grants access to nothing, so reaping one is harmless.
+      allow delete: if request.auth != null &&
+                       resource.data.walletId is string &&
+                       !exists(/databases/$(database)/documents/wallets/$(resource.data.walletId));
     }
   }
 }

@@ -12,10 +12,14 @@ const wallet: Wallet = {
   isPersonal: false
 };
 
-const split = (paidBy: string, participants: Array<{ userId: string; amount: number }>, settlements: Array<{ fromUserId: string; toUserId: string; amount: number }> = []): SplitDetails => ({
+const split = (
+  paidBy: string,
+  participants: Array<{ userId: string; amount: number }>,
+  settlements: Array<{ fromUserId: string; toUserId: string; amount: number; settledAt: number; settledBy: string }> = []
+): SplitDetails => ({
   splitType: 'equal',
   paidBy,
-  participants,
+  participants: participants.map(p => ({ ...p, userName: p.userId.toUpperCase() })),
   settlements
 });
 
@@ -66,6 +70,41 @@ describe('calculateMemberBalances', () => {
     // u1 paid 100, less own share 50, less settlement received 50 -> 0. u2 settled -> 0.
     expect(balances.u1).toBe(0);
     expect(balances.u2).toBe(0);
+  });
+
+  it('settles to zero even when the expense was edited after settling', () => {
+    // The settlement records what was owed at the time (50), but the expense has
+    // since been edited down and each share is now 40. Reducing the payer by the
+    // stale settlement amount instead of the current share left 10 stuck on their
+    // balance forever, with no debt on screen explaining it.
+    const balances = calculateMemberBalances(wallet, [
+      expense('1', 80, split('u1', [
+        { userId: 'u1', amount: 40 },
+        { userId: 'u2', amount: 40 }
+      ], [
+        { fromUserId: 'u2', toUserId: 'u1', amount: 50, settledAt: 1, settledBy: 'u2' }
+      ]))
+    ]);
+    expect(balances.u1).toBe(0);
+    expect(balances.u2).toBe(0);
+  });
+
+  it('keeps the books balanced across a mix of settled and unsettled shares', () => {
+    const balances = calculateMemberBalances(wallet, [
+      expense('1', 90, split('u1', [
+        { userId: 'u1', amount: 30 },
+        { userId: 'u2', amount: 30 },
+        { userId: 'u3', amount: 30 }
+      ], [
+        { fromUserId: 'u2', toUserId: 'u1', amount: 30, settledAt: 1, settledBy: 'u2' }
+      ]))
+    ]);
+    // u2 has paid up, u3 has not: u1 is owed exactly u3's share.
+    expect(balances.u1).toBe(30);
+    expect(balances.u2).toBe(0);
+    expect(balances.u3).toBe(-30);
+    // Everything nets out — no money invented or destroyed.
+    expect(balances.u1 + balances.u2 + balances.u3).toBe(0);
   });
 
   it('ignores members not in the wallet', () => {

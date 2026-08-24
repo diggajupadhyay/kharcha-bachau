@@ -48,12 +48,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const guestData = localStorage.getItem(GUEST_STORAGE_KEY);
 
         if (guestData) {
+            // Valid JSON is not enough. "null", a number, or an object missing `type`
+            // all parsed cleanly and were installed as the current user; the rest of
+            // the app then read `user.type !== 'guest'` as true and tried to write to
+            // Firestore under a `guest_…` id, where every request is denied.
+            let restored: User | null = null;
             try {
-              setUser(JSON.parse(guestData));
+              const parsed = JSON.parse(guestData);
+              if (parsed && typeof parsed === 'object' && parsed.type === 'guest' && typeof parsed.id === 'string' && parsed.id.length > 0) {
+                restored = { ...parsed, name: parsed.name || 'Guest', email: parsed.email || '' } as User;
+              }
             } catch (error) {
               if (import.meta.env.DEV) {
                 console.error('Error parsing guest data:', error);
               }
+            }
+            if (restored) {
+              setUser(restored);
+            } else {
               const newGuest = createGuestUser();
               localStorage.setItem(GUEST_STORAGE_KEY, JSON.stringify(newGuest));
               setUser(newGuest);
@@ -70,6 +82,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => unsubscribe();
   }, []);
 
+  // Both of these mean "the user backed out", not "sign-in failed". Only the first was
+  // filtered before, so opening the Google sheet twice (or tapping away from it)
+  // raised a red "Could not sign in" toast on a perfectly normal cancellation.
+  const USER_CANCELLED = ['auth/popup-closed-by-user', 'auth/cancelled-popup-request', 'auth/user-cancelled'];
+
   const signInWithGoogle = async () => {
     setIsLoading(true);
     try {
@@ -78,17 +95,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (error.code === 'auth/popup-blocked') {
         try {
           await signInWithRedirect(auth, googleProvider);
+          // The browser is navigating away, so the spinner is about to be discarded.
+          // Left as-is it would strand the UI on a spinner if the navigation is
+          // blocked (embedded webviews, strict extensions).
+          setIsLoading(false);
           return;
         } catch (redirectError: any) {
           setIsLoading(false);
-          if (redirectError.code !== 'auth/popup-closed-by-user') {
+          if (!USER_CANCELLED.includes(redirectError.code)) {
             throw redirectError;
           }
           return;
         }
       }
       setIsLoading(false);
-      if (error.code !== 'auth/popup-closed-by-user') {
+      if (!USER_CANCELLED.includes(error.code)) {
         if (import.meta.env.DEV) {
           console.error('Google sign-in error:', error.code, error.message);
         }

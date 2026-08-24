@@ -29,7 +29,11 @@ const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-auth flex items-center justify-center p-4 bg-slate-900/60 animate-fade-in">
+    // pointer-events-auto is set here rather than relied on from a parent: this
+    // dialog is rendered inside modal sheets whose outer wrapper is
+    // pointer-events-none, and pointer-events is inherited regardless of position:
+    // fixed — without it the confirm and cancel buttons cannot be pressed at all.
+    <div className="fixed inset-0 z-auth flex items-center justify-center p-4 bg-slate-900/60 animate-fade-in pointer-events-auto">
       <div
         ref={modalRef}
         role="alertdialog"

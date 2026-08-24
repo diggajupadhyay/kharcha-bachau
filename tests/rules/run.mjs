@@ -63,6 +63,25 @@ describe('Invites — must never be enumerable (KB-01)');
   check('listing every invite code', false, list.status);
   const get = await call('GET', '/invites/ABC123', { uid: A });
   check('reading one code you already know', true, get.status);
+
+  // An invite whose wallet still exists must stay put — deleting it would silently
+  // revoke a code other people are already holding.
+  await resetWallet();
+  await seed('/invites/LIVE01', { walletId: W, createdAt: 1700000000000 });
+  check('deleting a live wallet\'s invite', false,
+    (await call('DELETE', '/invites/LIVE01', { uid: A })).status);
+
+  // Once the wallet is gone the code grants access to nothing, so it may be reaped.
+  // Left behind, it stayed resolvable and anyone redeeming it hit "Wallet not found".
+  await call('DELETE', `/wallets/${W}`);
+  await seed('/invites/DEAD01', { walletId: W, createdAt: 1700000000000 });
+  check('reaping an invite whose wallet was deleted', true,
+    (await call('DELETE', '/invites/DEAD01', { uid: A })).status);
+
+  await resetWallet();
+  await seed('/invites/LIVE02', { walletId: W, createdAt: 1700000000000 });
+  check('repointing an invite at another wallet', false,
+    (await patch(A, '/invites/LIVE02', { walletId: 'attacker-wallet' })).status);
 }
 
 // ==============================================================================

@@ -1,11 +1,10 @@
 import React, { useState, Suspense, useCallback } from 'react';
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { LayoutGrid, Clock, Settings as SettingsIcon, Plus, Loader2 } from 'lucide-react';
+import { BrowserRouter, Routes, Route, NavLink, Navigate } from 'react-router-dom';
+import { LayoutGrid, Settings as SettingsIcon, Plus, Loader2 } from 'lucide-react';
 import { useCurrentDate } from './hooks/useCurrentDate';
 import { useRegisterSW } from 'virtual:pwa-register/react';
 
 const Tracker = React.lazy(() => import('./pages/Tracker'));
-const History = React.lazy(() => import('./pages/History'));
 const SettingsPage = React.lazy(() => import('./pages/SettingsPage'));
 const Privacy = React.lazy(() => import('./pages/Privacy'));
 import { StoreProvider } from './context/StoreContext';
@@ -31,7 +30,7 @@ const AppContent: React.FC = () => {
       setNeedRefresh(true);
     },
     onOfflineReady() {
-      console.log('App ready for offline use');
+      if (import.meta.env.DEV) console.log('App ready for offline use');
     },
   });
 
@@ -41,7 +40,11 @@ const AppContent: React.FC = () => {
 
   return (
       <div className="font-sans text-slate-900 bg-slate-100 min-h-screen flex justify-center overflow-x-hidden">
-        <div className="w-full max-w-lg sm:max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl bg-white h-[100dvh] md:h-auto md:min-h-screen relative shadow-2xl flex flex-col overflow-hidden mx-auto">
+        {/* The shell is a fixed-height viewport at every breakpoint and <main> is
+            always the scroll container. Previously md+ switched to document
+            scrolling via md:h-auto/md:overflow-visible, but md:overflow-visible
+            also disabled main's own scrolling, leaving nothing scrollable. */}
+        <div className="w-full max-w-lg sm:max-w-xl md:max-w-3xl lg:max-w-5xl xl:max-w-6xl bg-white h-[100dvh] relative shadow-2xl flex flex-col overflow-hidden mx-auto">
 
           <InstallPrompt />
           <OfflineBanner />
@@ -52,17 +55,23 @@ const AppContent: React.FC = () => {
             onClose={() => setNeedRefresh(false)}
           />
 
-          <main className="flex-1 overflow-y-auto overflow-x-hidden no-scrollbar scroll-smooth bg-slate-50/50 overscroll-behavior-y-contain">
+          <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar scroll-smooth bg-slate-50/50 overscroll-behavior-y-contain">
             <Suspense fallback={
-              <div className="h-full flex items-center justify-center bg-slate-50">
+              <div className="h-full min-h-[60vh] flex items-center justify-center bg-slate-50">
                 <Loader2 className="animate-spin text-emerald-600" size={32} />
               </div>
             }>
               <Routes>
                 <Route path="/" element={<Tracker currentDate={currentDate} />} />
-                <Route path="/history" element={<History />} />
+                {/* History was merged into Home; old links and PWA shortcuts still
+                    point at /history, so redirect rather than 404 into the catch-all. */}
+                <Route path="/history" element={<Navigate to="/" replace />} />
                 <Route path="/settings" element={<SettingsPage />} />
                 <Route path="/privacy" element={<Privacy />} />
+                {/* Hosting rewrites every unmatched path to index.html, so a typo'd
+                    or stale URL used to load the app and then render nothing at all —
+                    a blank screen with a working nav bar. */}
+                <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </Suspense>
           </main>
@@ -73,21 +82,11 @@ const AppContent: React.FC = () => {
             <nav className="relative pointer-events-auto bg-white border-t border-slate-300 flex justify-between items-center px-4 md:px-6 pt-0 pb-1 md:pb-2" style={{ paddingBottom: 'max(4px, env(safe-area-inset-bottom, 0px))' }}>
 
               {/* Home */}
-              <NavLink to="/" className="flex flex-col items-center justify-center gap-1 flex-1 pt-6 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
+              <NavLink to="/" className="flex flex-col items-center justify-center gap-1 flex-1 pt-5 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
                 {({ isActive }) => (
                   <>
-                    <LayoutGrid size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-500'} />
-                    <span className={`text-[11px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-500'}`}>Home</span>
-                  </>
-                )}
-              </NavLink>
-
-              {/* History */}
-              <NavLink to="/history" className="flex flex-col items-center justify-center gap-1 flex-1 pt-6 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
-                {({ isActive }) => (
-                  <>
-                    <Clock size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-500'} />
-                    <span className={`text-[11px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-500'}`}>History</span>
+                    <LayoutGrid size={26} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-600'} />
+                    <span className={`text-[13px] md:text-sm leading-tight font-semibold ${isActive ? 'text-emerald-600' : 'text-slate-600'}`}>Home</span>
                   </>
                 )}
               </NavLink>
@@ -96,19 +95,19 @@ const AppContent: React.FC = () => {
               <div className="flex-1 flex items-center justify-center">
                 <button
                   onClick={handleOpenQuickAdd}
-                  className="w-14 h-14 md:w-16 md:h-16 rounded-full bg-emerald-600 text-white shadow-xl active:scale-95 hover:bg-emerald-700 hover:shadow-2xl hover:scale-105 transition-all -mt-8 md:-mt-9"
+                  className="w-16 h-16 md:w-[4.5rem] md:h-[4.5rem] rounded-full bg-emerald-600 text-white shadow-xl active:scale-95 hover:bg-emerald-700 hover:shadow-2xl hover:scale-105 transition-all -mt-9 md:-mt-10"
                   aria-label="Add expense"
                 >
-                  <Plus size={28} strokeWidth={2.5} className="mx-auto" />
+                  <Plus size={32} strokeWidth={3} className="mx-auto" />
                 </button>
               </div>
 
               {/* Settings */}
-              <NavLink to="/settings" className="flex flex-col items-center justify-center gap-1 flex-1 pt-6 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
+              <NavLink to="/settings" className="flex flex-col items-center justify-center gap-1 flex-1 pt-5 pb-2 md:py-3 rounded-lg hover:bg-slate-50 active:bg-slate-100 transition-colors">
                 {({ isActive }) => (
                   <>
-                    <SettingsIcon size={22} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-500'} />
-                    <span className={`text-[11px] md:text-xs leading-tight font-medium ${isActive ? 'text-emerald-600' : 'text-slate-500'}`}>Settings</span>
+                    <SettingsIcon size={26} strokeWidth={isActive ? 2.5 : 2} className={isActive ? 'text-emerald-600' : 'text-slate-600'} />
+                    <span className={`text-[13px] md:text-sm leading-tight font-semibold ${isActive ? 'text-emerald-600' : 'text-slate-600'}`}>Settings</span>
                   </>
                 )}
               </NavLink>
