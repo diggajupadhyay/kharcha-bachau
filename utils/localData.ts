@@ -31,6 +31,7 @@ const LOCAL_DATA_KEYS = [
   'kharcha_bachau_read_notifications',
   'kharcha_bachau_dismissed_notifications',
   'kharcha_bachau_notification_preferences',
+  'kharcha_bachau_coach_seen',
 ];
 
 export const clearLocalData = () => {

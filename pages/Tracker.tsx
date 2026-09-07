@@ -6,6 +6,7 @@ import WalletSelector from '../components/WalletSelector';
 import Skeleton, { TransactionListSkeleton } from '../components/Skeleton';
 import BalanceSummary from '../components/BalanceSummary';
 import ConfirmDialog from '../components/ConfirmDialog';
+import FirstRunCoach from '../components/FirstRunCoach';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { Expense } from '../types';
@@ -243,6 +244,7 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
       paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
       paddingBottom: 'calc(6rem + env(safe-area-inset-bottom, 0px))'
     }}>
+      <FirstRunCoach />
       <div className="px-4 md:px-6 lg:px-8 max-w-2xl mx-auto">
 
         {/* Header — the wallet name is the only wallet switcher; a second icon button
@@ -260,6 +262,8 @@ const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
               </h1>
               <ChevronDown size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors flex-shrink-0" />
             </button>
+            {/* One-line explainer: "wallet" is jargon until someone defines it once. */}
+            <p className="text-caption mt-1">A wallet is one pot of money — e.g. Home, or a Trip with friends.</p>
           </div>
           <button
             onClick={() => setShowFilters(!showFilters)}

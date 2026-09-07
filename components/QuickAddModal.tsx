@@ -39,8 +39,8 @@ const QuickAddModal: React.FC<{ isOpen: boolean; onClose: () => void }> = ({ isO
           disables pointer events, so without it the sheet opened by the main + button
           could not be clicked, scrolled or dismissed. */}
       {!selectedCategory && (
-        <div className="fixed inset-0 z-modal flex items-end sm:items-center justify-center pointer-events-none overflow-x-hidden p-0 sm:p-2 md:p-4 lg:p-6">
-          <div className="absolute inset-0 bg-slate-900/60 pointer-events-auto" onClick={handleClose} />
+        <div className="fixed inset-0 z-modal flex items-end sm:items-center justify-center pointer-events-none overflow-hidden p-0 sm:p-2 md:p-4 lg:p-6">
+          <div className="absolute inset-0 bg-slate-900/60 pointer-events-auto animate-fade-in" onClick={handleClose} />
           <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="quick-add-title"
             className="bg-white w-full sm:max-w-md md:max-w-lg lg:max-w-2xl xl:max-w-3xl rounded-t-2xl sm:rounded-2xl shadow-2xl pointer-events-auto relative z-10 flex flex-col max-h-[90vh] max-w-full animate-slide-up-bottom sm:animate-scale-in"
             style={{ paddingTop: 'max(1rem, env(safe-area-inset-top, 0px))', paddingBottom: 'max(1rem, env(safe-area-inset-bottom, 0px))' }}>

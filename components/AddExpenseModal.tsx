@@ -215,8 +215,8 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
   const submitAndClose = () => { onClose(); resetForm(); };
 
   return (
-    <div className="fixed inset-0 z-modal flex items-end sm:items-center justify-center pointer-events-none overflow-x-hidden p-2 md:p-4 lg:p-6">
-      <div className="absolute inset-0 bg-slate-900/60 pointer-events-auto" onClick={safeClose} />
+    <div className="fixed inset-0 z-modal flex items-end sm:items-center justify-center pointer-events-none overflow-hidden p-2 md:p-4 lg:p-6">
+      <div className="absolute inset-0 bg-slate-900/60 pointer-events-auto animate-fade-in" onClick={safeClose} />
       <div ref={modalRef} role="dialog" aria-modal="true" aria-labelledby="add-expense-title"
         className="bg-white w-full sm:max-w-md md:max-w-lg lg:max-w-xl rounded-t-2xl sm:rounded-2xl shadow-2xl pointer-events-auto flex flex-col overflow-hidden relative max-w-full animate-slide-up-bottom sm:animate-scale-in"
         style={{
@@ -330,22 +330,20 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
           </div>
         )}
 
-        {/* Keypad */}
-        <div className="px-4 sm:px-6 pb-2">
-          <div className="grid grid-cols-4 gap-2">
-            {[1,2,3].map(n => <button key={n} onClick={() => handleNumClick(n.toString())} className="btn-secondary !py-3.5 text-lg font-bold">{n}</button>)}
-            <button onClick={handleDelete} className="btn-secondary !py-3.5"><Delete size={20} /></button>
-            {[4,5,6].map(n => <button key={n} onClick={() => handleNumClick(n.toString())} className="btn-secondary !py-3.5 text-lg font-bold">{n}</button>)}
-            <div className="row-span-2">
-              <button onClick={handleSubmit} disabled={isSubmitting} className="btn-primary w-full h-full !rounded-xl" aria-label={isSubmitting ? 'Saving' : 'Save expense'}>
-                {isSubmitting ? <Loader2 size={24} className="animate-spin" /> : <Check size={24} />}
-              </button>
-            </div>
-            {[7,8,9].map(n => <button key={n} onClick={() => handleNumClick(n.toString())} className="btn-secondary !py-3.5 text-lg font-bold">{n}</button>)}
-            <button onClick={() => handleNumClick('.')} className="btn-secondary !py-3.5 text-lg font-bold">.</button>
-            <button onClick={() => handleNumClick('0')} className="btn-secondary !py-3.5 text-lg font-bold">0</button>
-            <button onClick={() => handleNumClick('00')} className="btn-secondary !py-3.5 text-lg font-bold">00</button>
+        {/* Keypad — 3 columns so every cell holds a real key, then one big
+            labeled Save button. The old 4-column grid left a blank cell and hid
+            the most important action behind a bare check icon. */}
+        <div className="px-4 sm:px-6 pb-2 space-y-2">
+          <div className="grid grid-cols-3 gap-2">
+            {[1,2,3,4,5,6,7,8,9].map(n => <button key={n} onClick={() => handleNumClick(n.toString())} className="btn-secondary !py-4 text-xl font-bold">{n}</button>)}
+            <button onClick={() => handleNumClick('.')} className="btn-secondary !py-4 text-xl font-bold" aria-label="Decimal point">.</button>
+            <button onClick={() => handleNumClick('0')} className="btn-secondary !py-4 text-xl font-bold">0</button>
+            <button onClick={handleDelete} className="btn-secondary !py-4" aria-label="Erase last digit"><Delete size={22} /></button>
           </div>
+          <button onClick={handleSubmit} disabled={isSubmitting} className="btn-primary w-full !py-4 text-lg">
+            {isSubmitting ? <Loader2 size={24} className="animate-spin" /> : <Check size={24} />}
+            {isSubmitting ? 'Saving…' : 'Save expense'}
+          </button>
         </div>
 
       </div>

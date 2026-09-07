@@ -29,9 +29,11 @@ export function useFocusTrap(
         (el) => el.offsetParent !== null || el === document.activeElement
       );
 
-    // Move focus into the dialog
+    // Move focus into the dialog without scrolling: the app shell is a
+    // smooth-scrolling container, so a focus-induced scroll would glide
+    // visibly for ~a second on every modal open.
     const initial = getItems()[0];
-    initial?.focus();
+    initial?.focus({ preventScroll: true });
 
     const onKeyDown = (e: KeyboardEvent) => {
       // Escape closes the dialog. Nothing in the app handled it before, so a keyboard

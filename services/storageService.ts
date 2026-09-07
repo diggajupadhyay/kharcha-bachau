@@ -71,7 +71,7 @@ export const createWallet = async (user: User, walletName: string, isPersonal: b
         await setDoc(newWalletRef, newWallet);
         
         if (import.meta.env.DEV) {
-            console.log('Wallet created successfully:', newWalletRef.id, isPersonal ? '(personal)' : '(shared)');
+
         }
         
         return newWalletRef.id;
@@ -113,7 +113,7 @@ export const getUserWallets = async (user: User): Promise<Wallet[]> => {
         });
 
         if (import.meta.env.DEV) {
-            console.log('Fetched wallets:', wallets.length);
+
         }
         
         return wallets;
@@ -139,7 +139,7 @@ export const leaveWallet = async (user: User, walletId: string) => {
         });
         
         if (import.meta.env.DEV) {
-            console.log('Left wallet successfully:', walletId);
+
         }
     } catch (error: any) {
         if (import.meta.env.DEV) {
@@ -184,7 +184,7 @@ export const deleteWallet = async (user: User, walletId: string) => {
         }
 
         if (import.meta.env.DEV) {
-            console.log('Wallet deleted successfully:', walletId);
+
         }
     } catch (error: any) {
         if (import.meta.env.DEV) {
@@ -211,7 +211,7 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
         
         if (sourceSnapshot.empty) {
             if (import.meta.env.DEV) {
-                console.log('Source wallet is empty, deleting empty wallet');
+
             }
             const sourceWalletRef = doc(db, 'wallets', sourceWalletId);
             await deleteDoc(sourceWalletRef);
@@ -245,7 +245,7 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
         const mergedCount = toMerge.length;
 
         if (import.meta.env.DEV) {
-            console.log(`Wallet merge completed: ${mergedCount} expenses merged, ${skippedCount} duplicates skipped`);
+
         }
     } catch (error: any) {
         if (import.meta.env.DEV) {
@@ -274,7 +274,7 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
         }
 
         if (import.meta.env.DEV) {
-            console.log(`Found ${personalWallets.length} personal wallets, cleaning up duplicates...`);
+
         }
 
         const walletExpenseCounts = await Promise.all(
@@ -303,7 +303,7 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
             try {
                 await mergeWallets(user, wallet.id, targetWallet.id);
                 if (import.meta.env.DEV) {
-                    console.log(`Merged wallet ${wallet.id} into ${targetWallet.id}`);
+
                 }
             } catch (error: any) {
                 if (import.meta.env.DEV) {
@@ -313,7 +313,7 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
         }
 
         if (import.meta.env.DEV) {
-            console.log(`Cleanup completed. Keeping personal wallet: ${targetWallet.id}`);
+
         }
 
         return targetWallet.id;
@@ -372,7 +372,7 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
                     }
 
                     if (import.meta.env.DEV) {
-                        console.log('Invite code generated:', code);
+
                     }
 
                     return code;
@@ -386,7 +386,7 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
             } else {
                 attempts++;
                 if (import.meta.env.DEV) {
-                    console.warn(`Invite code collision detected, retrying... (attempt ${attempts}/${maxRetries})`);
+
                 }
             }
         }
@@ -458,7 +458,7 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
         }
 
         if (import.meta.env.DEV) {
-            console.log('Joined wallet successfully:', walletId);
+
         }
 
         return walletId;
@@ -584,14 +584,14 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
         mutateLocalData(current => [...current, newExpense]);
 
         if (import.meta.env.DEV) {
-            console.log('Expense saved locally (guest mode)');
+
         }
     } else {
         try {
             await setDoc(doc(db, 'wallets', activeWalletId, 'expenses', newExpense.id), newExpense);
             
             if (import.meta.env.DEV) {
-                console.log('Expense saved to Firestore:', newExpense.id);
+
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -643,14 +643,14 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
         mutateLocalData(current => current.map(p => p.id === expenseId ? { ...p, ...allowedUpdates } : p));
 
         if (import.meta.env.DEV) {
-            console.log('Expense updated locally (guest mode)');
+
         }
     } else {
         try {
             await updateDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId), allowedUpdates);
             
             if (import.meta.env.DEV) {
-                console.log('Expense updated in Firestore:', expenseId);
+
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -729,7 +729,7 @@ export const saveCustomCategories = async (user: User, categories: Category[]): 
                 });
             }
             if (import.meta.env.DEV) {
-                console.log('Custom categories saved to Firestore');
+
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -745,14 +745,14 @@ export const deleteExpense = async (user: User, activeWalletId: string, expenseI
         mutateLocalData(current => current.filter(p => p.id !== expenseId));
 
         if (import.meta.env.DEV) {
-            console.log('Expense deleted locally (guest mode)');
+
         }
     } else {
         try {
             await deleteDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId));
             
             if (import.meta.env.DEV) {
-                console.log('Expense deleted from Firestore:', expenseId);
+
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -791,7 +791,7 @@ export const clearAllExpenses = async (user: User, walletId: string, ownOnly = f
         saveLocalData([]);
 
         if (import.meta.env.DEV) {
-            console.log('All expenses cleared locally (guest mode)');
+
         }
     } else {
         try {
@@ -803,7 +803,7 @@ export const clearAllExpenses = async (user: User, walletId: string, ownOnly = f
             await deleteDocsInChunks(snapshot.docs.map(docSnap => docSnap.ref));
 
             if (import.meta.env.DEV) {
-                console.log('Expenses cleared from Firestore:', snapshot.docs.length);
+
             }
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -941,7 +941,7 @@ export const syncGuestData = async (user: User) => {
         // up" banner permanently stuck on rows that can never be written.
         if (unmigratable > 0) localStorage.removeItem(GUEST_DATA_KEY);
         if (import.meta.env.DEV) {
-            console.log('No guest data to sync', unmigratable ? `(${unmigratable} unusable rows dropped)` : '');
+
         }
         return;
     }
@@ -981,7 +981,7 @@ export const syncGuestData = async (user: User) => {
         localStorage.removeItem(GUEST_DATA_KEY);
         
         if (import.meta.env.DEV) {
-            console.log('Guest data synced to Firestore:', localData.length, 'expenses');
+
         }
 
         await cleanupDuplicatePersonalWallets(user);
@@ -1105,7 +1105,7 @@ export const deleteAccount = async (user: User): Promise<void> => {
     clearLocalData();
 
     if (import.meta.env.DEV) {
-      console.log('Account data deletion completed for user:', user.id);
+
     }
   } catch (error: any) {
     if (import.meta.env.DEV) {

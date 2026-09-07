@@ -4,10 +4,11 @@ import { useFocusTrap } from '../hooks/useFocusTrap';
 import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
-import { LogOut, User, Cloud, Wallet, Download, ChevronRight, Share2, Trash2, Tag, Upload, Database, AlertTriangle } from 'lucide-react';
+import { LogOut, User, Cloud, Wallet, ChevronRight, ChevronDown, Share2, Trash2, Tag, Upload, Database, AlertTriangle, SlidersHorizontal } from 'lucide-react';
 import WalletSelector from '../components/WalletSelector';
 import CategoryManager from '../components/CategoryManager';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { replayFirstRunCoach } from '../components/FirstRunCoach';
 import * as storage from '../services/storageService';
 import { generateCSVExport } from '../services/csvService';
 import { exportBackup, importBackup, previewBackup, mergeBackupData, sanitizeBackupExpenses } from '../services/backupService';
@@ -22,6 +23,7 @@ const SettingsPage: React.FC = () => {
   const [isCategoryManagerOpen, setIsCategoryManagerOpen] = useState(false);
   const [inviteCode, setInviteCode] = useState<string | null>(null);
   const [showImportDialog, setShowImportDialog] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [backupPreview, setBackupPreview] = useState<any>(null);
   const [selectedImportFile, setSelectedImportFile] = useState<File | null>(null);
   const [confirmDialog, setConfirmDialog] = useState({
@@ -338,65 +340,88 @@ const SettingsPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Backup */}
+        {/* Backup — one clear action: save a copy of my data. Restoring and
+            the destructive tools live under Advanced below, so nobody taps
+            them by accident. */}
         <div className="card section">
-          <p className="section-title">Backup & Export</p>
-          <p className="text-xs text-slate-500 mb-3">Save a copy of your data, or restore from a previous backup.</p>
-          <div className="grid grid-cols-3 gap-2">
-            <button onClick={handleCSV} className="btn-secondary flex-col !py-3 gap-1.5">
-              <Download size={20} />
-              <span className="text-xs">Spreadsheet</span>
-            </button>
-            <button onClick={handleExportBackup} className="btn-secondary flex-col !py-3 gap-1.5">
-              <Database size={20} />
-              <span className="text-xs">Backup file</span>
-            </button>
-            <button onClick={() => { setShowImportDialog(true); setBackupPreview(null); }} className="btn-secondary flex-col !py-3 gap-1.5">
-              <Upload size={20} />
-              <span className="text-xs">Restore</span>
-            </button>
-          </div>
+          <p className="section-title">Keep my data safe</p>
+          <button onClick={handleExportBackup} className="btn-primary w-full">
+            <Database size={20} />
+            Save a copy of my data
+          </button>
+          <p className="text-xs text-slate-500 mt-2.5 leading-relaxed">
+            Downloads a file you can bring back later with Restore. Once you sign in, your data is also kept safe automatically.
+          </p>
+          <button onClick={handleCSV} className="mt-1 min-h-[48px] w-full text-sm font-semibold text-slate-600 underline underline-offset-2 hover:text-slate-800 active:scale-95 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 rounded">
+            Download as spreadsheet (for viewing only)
+          </button>
         </div>
 
-        {/* Danger Zone */}
-        <div className="section">
-          <p className="section-title text-rose-600">Danger Zone</p>
-          {/* One shared row shape for all three: same padding, same icon gap, same
-              left edge. The middle one used to carry its own px/gap/min-h and so sat
-              a few pixels off from the two around it. */}
-          <div className="space-y-2">
-            <button onClick={handleClearData} className="btn-danger w-full justify-start gap-3 px-4">
-              <Trash2 size={20} className="flex-shrink-0" />
-              <span className="text-left">
-                <span className="block text-sm font-semibold">{canClearOthers ? 'Delete all expenses' : 'Delete my expenses'}</span>
-                <span className="block text-xs opacity-70 font-normal">{canClearOthers ? 'Keeps the wallet, removes what is in it' : 'Removes only the ones you added'}</span>
-              </span>
-            </button>
-            {isSharedWallet && (
-              <button onClick={handleLeaveOrDelete} className={`w-full justify-start gap-3 px-4 focus-visible:ring-2 focus-visible:ring-offset-2 ${activeWallet?.ownerId === user?.id ? 'btn-danger' : 'btn-secondary'}`}>
-                <Trash2 size={20} className="flex-shrink-0" />
+        {/* Advanced — restore and destructive tools, collapsed by default. */}
+        <div className="card section">
+          <button
+            onClick={() => setShowAdvanced(v => !v)}
+            aria-expanded={showAdvanced}
+            className="w-full min-h-[56px] flex items-center justify-between active:scale-[0.98] transition-transform focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 rounded-xl"
+          >
+            <div className="flex items-center gap-3">
+              <SlidersHorizontal size={22} className="text-slate-600" />
+              <div className="text-left">
+                <p className="text-sm font-semibold text-slate-900">Advanced</p>
+                <p className="text-xs text-slate-500">Restore backups, delete data</p>
+              </div>
+            </div>
+            <ChevronDown size={20} className={`text-slate-400 transition-transform ${showAdvanced ? 'rotate-180' : ''}`} />
+          </button>
+          {showAdvanced && (
+            <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+              <button onClick={() => { setShowImportDialog(true); setBackupPreview(null); }} className="btn-secondary w-full justify-start gap-3 px-4">
+                <Upload size={20} className="flex-shrink-0" />
                 <span className="text-left">
-                  <span className="block text-sm font-semibold">{activeWallet?.ownerId === user?.id ? 'Delete this wallet' : 'Leave this wallet'}</span>
-                  <span className="block text-xs opacity-70 font-normal">{activeWallet?.ownerId === user?.id ? 'Removes it for everyone' : 'You can rejoin with the code'}</span>
+                  <span className="block text-sm font-semibold">Restore from a backup file</span>
+                  <span className="block text-xs opacity-70 font-normal">Brings saved expenses back, removes nothing</span>
                 </span>
               </button>
-            )}
-            <button onClick={handleDeleteAccount} className="btn-danger w-full justify-start gap-3 px-4">
-              <Trash2 size={20} className="flex-shrink-0" />
-              <span className="text-left">
-                <span className="block text-sm font-semibold">{user?.type === 'user' ? 'Delete my account' : 'Clear this device'}</span>
-                <span className="block text-xs opacity-70 font-normal">{user?.type === 'user' ? 'Removes everything, everywhere' : 'Removes everything saved here'}</span>
-              </span>
-            </button>
-          </div>
+              {/* One shared row shape for all danger actions: same padding, same
+                  icon gap, same left edge. */}
+              <button onClick={handleClearData} className="btn-danger w-full justify-start gap-3 px-4">
+                <Trash2 size={20} className="flex-shrink-0" />
+                <span className="text-left">
+                  <span className="block text-sm font-semibold">{canClearOthers ? 'Delete all expenses' : 'Delete my expenses'}</span>
+                  <span className="block text-xs opacity-70 font-normal">{canClearOthers ? 'Keeps the wallet, removes what is in it' : 'Removes only the ones you added'}</span>
+                </span>
+              </button>
+              {isSharedWallet && (
+                <button onClick={handleLeaveOrDelete} className={`w-full justify-start gap-3 px-4 focus-visible:ring-2 focus-visible:ring-offset-2 ${activeWallet?.ownerId === user?.id ? 'btn-danger' : 'btn-secondary'}`}>
+                  <Trash2 size={20} className="flex-shrink-0" />
+                  <span className="text-left">
+                    <span className="block text-sm font-semibold">{activeWallet?.ownerId === user?.id ? 'Delete this wallet' : 'Leave this wallet'}</span>
+                    <span className="block text-xs opacity-70 font-normal">{activeWallet?.ownerId === user?.id ? 'Removes it for everyone' : 'You can rejoin with the code'}</span>
+                  </span>
+                </button>
+              )}
+              <button onClick={handleDeleteAccount} className="btn-danger w-full justify-start gap-3 px-4">
+                <Trash2 size={20} className="flex-shrink-0" />
+                <span className="text-left">
+                  <span className="block text-sm font-semibold">{user?.type === 'user' ? 'Delete my account' : 'Clear this device'}</span>
+                  <span className="block text-xs opacity-70 font-normal">{user?.type === 'user' ? 'Removes everything, everywhere' : 'Removes everything saved here'}</span>
+                </span>
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Footer */}
         <div className="text-center py-6 space-y-2">
           <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Kharcha Bachau v{__APP_VERSION__}</p>
-          <button onClick={() => { navigate('/privacy'); }} className="text-xs text-emerald-600 underline underline-offset-2 hover:text-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 rounded">
-            Privacy Policy
-          </button>
+          <div className="flex items-center justify-center gap-4">
+            <button onClick={() => { navigate('/privacy'); }} className="text-xs text-emerald-600 underline underline-offset-2 hover:text-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 rounded">
+              Privacy Policy
+            </button>
+            <button onClick={replayFirstRunCoach} className="text-xs text-emerald-600 underline underline-offset-2 hover:text-emerald-700 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 rounded">
+              Replay quick tour
+            </button>
+          </div>
         </div>
 
         {/* Import Dialog — a plain div before, so it had no dialog role, no focus
