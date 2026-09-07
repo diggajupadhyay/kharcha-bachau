@@ -266,7 +266,7 @@ const SettingsPage: React.FC = () => {
               </div>
               <button onClick={handleBackupToCloud} className="btn-primary w-full">
                 <Cloud size={20} />
-                Keep my data safe
+                Sign in to save my data
               </button>
             </div>
           )}
