@@ -97,11 +97,16 @@ service cloud.firestore {
                              incomingData.memberProfiles[request.auth.uid] is string &&
                              incomingData.memberProfiles[request.auth.uid].size() > 0 &&
                              incomingData.memberProfiles[request.auth.uid].size() <= 60;
-        // Members can only update 'members' array (to leave)
+        // Members can only update 'members' array (to leave). Exactly one entry may
+        // disappear and it must be the caller's own: without the size and hasAll
+        // checks a member could "leave" by submitting an empty list, dropping every
+        // co-member — including the owner, who then could not even read the wallet.
         let memberCanLeave = incomingData.diff(existingData).affectedKeys().hasOnly(['members']) &&
                              incomingData.members is list &&
                              !(request.auth.uid in incomingData.members) && // User is removing themselves
-                             (request.auth.uid in existingData.members); // User was a member
+                             (request.auth.uid in existingData.members) && // User was a member
+                             incomingData.members.size() == existingData.members.size() - 1 &&
+                             existingData.members.hasAll(incomingData.members); // nobody else dropped
 
         return (isOwner() && ownerCanUpdate) || (isMember() && memberCanLeave) ||
                memberCanPublishInviteCode || memberCanSetBudget || memberCanSetOwnProfile;
@@ -169,7 +174,13 @@ service cloud.firestore {
 
         // Validate new expense data on creation
         function isValidExpenseCreate() {
-          let hasRequiredFields = request.resource.data.keys().hasAll(['id', 'walletId', 'categoryId', 'categoryName', 'categoryEmoji', 'amount', 'note', 'date', 'createdBy', 'createdAt']);
+          // hasAll names what must be present; hasOnly caps what may be. Without the
+          // second check a member could pad an expense with arbitrary fields up to
+          // Firestore's 1 MiB document limit, and every other member of the wallet
+          // would sync it down.
+          let hasRequiredFields = request.resource.data.keys().hasAll(['id', 'walletId', 'categoryId', 'categoryName', 'categoryEmoji', 'amount', 'note', 'date', 'createdBy', 'createdAt']) &&
+                 request.resource.data.keys().hasOnly(['id', 'walletId', 'categoryId', 'categoryName', 'categoryEmoji', 'amount', 'note', 'date', 'createdBy', 'createdAt', 'splitDetails', 'tags', 'transportDetails']) &&
+                 request.resource.data.createdBy.keys().hasOnly(['uid', 'name']);
           let basicValidation = request.resource.data.id == expenseId &&
                  request.resource.data.walletId == walletId &&
                  request.resource.data.categoryId is string && request.resource.data.categoryId.size() > 0 &&
@@ -222,7 +233,9 @@ service cloud.firestore {
 
            let basicValidation = affectedKeys.hasOnly(allowedFields) &&
                   (incomingData.amount is number && incomingData.amount > 0 && incomingData.amount <= 1000000000) &&
-                 (incomingData.note is string);
+                 // Same 500-character cap as create. Unbounded here, an edit could
+                 // grow a note the create rule would have refused outright.
+                 (incomingData.note is string && incomingData.note.size() <= 500);
           
           // Validate splitDetails if being updated (can be null to remove, or must be valid)
           let splitDetailsValid = !('splitDetails' in affectedKeys) ||
@@ -274,6 +287,10 @@ service cloud.firestore {
           return newSettlements is list &&
                  oldSettlements is list &&
                  newSettlements.size() == oldSettlements.size() + 1 &&
+                 // Strictly append-only. The size check alone left every earlier
+                 // entry unpinned, so a member could inflate or forge a settlement
+                 // recorded weeks ago in the same write that appends a valid one.
+                 newSettlements == oldSettlements.concat([added]) &&
                  added.settledBy == request.auth.uid &&
                  (added.fromUserId == request.auth.uid || added.toUserId == request.auth.uid) &&
                  added.fromUserId in getWallet().members &&

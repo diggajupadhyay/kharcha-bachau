@@ -70,10 +70,6 @@ export const createWallet = async (user: User, walletName: string, isPersonal: b
 
         await setDoc(newWalletRef, newWallet);
         
-        if (import.meta.env.DEV) {
-
-        }
-        
         return newWalletRef.id;
     } catch (error: any) {
         if (import.meta.env.DEV) {
@@ -112,10 +108,6 @@ export const getUserWallets = async (user: User): Promise<Wallet[]> => {
             } as Wallet;
         });
 
-        if (import.meta.env.DEV) {
-
-        }
-        
         return wallets;
     } catch (error: any) {
         if (import.meta.env.DEV) {
@@ -138,9 +130,6 @@ export const leaveWallet = async (user: User, walletId: string) => {
             members: arrayRemove(user.id)
         });
         
-        if (import.meta.env.DEV) {
-
-        }
     } catch (error: any) {
         if (import.meta.env.DEV) {
             console.error('Error leaving wallet:', error);
@@ -183,9 +172,6 @@ export const deleteWallet = async (user: User, walletId: string) => {
             try { await deleteDoc(doc(db, 'invites', inviteCode)); } catch { /* harmless */ }
         }
 
-        if (import.meta.env.DEV) {
-
-        }
     } catch (error: any) {
         if (import.meta.env.DEV) {
             console.error('Error deleting wallet:', error);
@@ -210,9 +196,6 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
         const sourceSnapshot = await getDocs(sourceExpensesRef);
         
         if (sourceSnapshot.empty) {
-            if (import.meta.env.DEV) {
-
-            }
             const sourceWalletRef = doc(db, 'wallets', sourceWalletId);
             await deleteDoc(sourceWalletRef);
             return;
@@ -225,7 +208,6 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
         const toMerge = sourceSnapshot.docs
             .map(docSnap => docSnap.data() as Expense)
             .filter(expense => !existingExpenseIds.has(expense.id));
-        const skippedCount = sourceSnapshot.docs.length - toMerge.length;
 
         await commitInChunks(toMerge, (batch, expense) => {
             batch.set(doc(targetExpensesRef, expense.id), {
@@ -242,11 +224,6 @@ export const mergeWallets = async (user: User, sourceWalletId: string, targetWal
         await deleteDocsInChunks(remainingExpensesSnapshot.docs.map(docSnap => docSnap.ref));
         await deleteDoc(doc(db, 'wallets', sourceWalletId));
 
-        const mergedCount = toMerge.length;
-
-        if (import.meta.env.DEV) {
-
-        }
     } catch (error: any) {
         if (import.meta.env.DEV) {
             console.error('Error merging wallets:', error);
@@ -271,10 +248,6 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
         
         if (personalWallets.length <= 1) {
             return personalWallets.length === 1 ? personalWallets[0].id : null;
-        }
-
-        if (import.meta.env.DEV) {
-
         }
 
         const walletExpenseCounts = await Promise.all(
@@ -302,18 +275,11 @@ export const cleanupDuplicatePersonalWallets = async (user: User): Promise<strin
         for (const { wallet } of walletsToMerge) {
             try {
                 await mergeWallets(user, wallet.id, targetWallet.id);
-                if (import.meta.env.DEV) {
-
-                }
             } catch (error: any) {
                 if (import.meta.env.DEV) {
                     console.error(`Failed to merge wallet ${wallet.id}:`, error);
                 }
             }
-        }
-
-        if (import.meta.env.DEV) {
-
         }
 
         return targetWallet.id;
@@ -371,10 +337,6 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
                         /* wallet already has a code, or the write raced — code still works */
                     }
 
-                    if (import.meta.env.DEV) {
-
-                    }
-
                     return code;
                 } catch (error: any) {
                     if (error.code === 'permission-denied' || error.code === 'already-exists') {
@@ -385,9 +347,6 @@ export const getOrGenerateInviteCode = async (walletId: string): Promise<string>
                 }
             } else {
                 attempts++;
-                if (import.meta.env.DEV) {
-
-                }
             }
         }
         
@@ -426,26 +385,38 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
             throw new Error("Invalid invite data");
         }
 
-        const existing = await getDoc(doc(db, 'wallets', walletId));
-        // An invite outlives the wallet it points at when the owner deletes it.
-        // "Wallet not found" made that look like an app fault rather than a code
-        // that has simply expired.
-        if (!existing.exists()) {
-            throw new Error("That wallet no longer exists");
+        // A wallet is readable only by its members, so this read SUCCEEDING is the
+        // signal that the caller has already joined. It failing is the normal path
+        // for a genuine invite — the previous version treated the denial as a fatal
+        // error and surfaced "Permission denied. Please check your authentication.",
+        // which made redeeming any invite code impossible.
+        let alreadyMember = false;
+        try {
+            const existing = await getDoc(doc(db, 'wallets', walletId));
+            alreadyMember = existing.exists() &&
+                Array.isArray(existing.data()?.members) &&
+                existing.data()!.members.includes(user.id);
+        } catch {
+            /* Not a member yet (or the wallet is gone) — let the join write decide. */
         }
-
-        // The join rule requires the caller not already be in `members`, so a second
-        // attempt is rejected with permission-denied and surfaced as "Permission
-        // denied. Please check your authentication." — which reads like a broken
-        // login rather than "you are already here".
-        const existingMembers = existing.data()?.members;
-        if (Array.isArray(existingMembers) && existingMembers.includes(user.id)) {
+        if (alreadyMember) {
             throw new Error("You are already a member of this wallet");
         }
 
-        await updateDoc(doc(db, 'wallets', walletId), {
-            members: arrayUnion(user.id)
-        });
+        try {
+            await updateDoc(doc(db, 'wallets', walletId), {
+                members: arrayUnion(user.id)
+            });
+        } catch (joinError: any) {
+            // The join rule is the only thing that can reject here, and it refuses
+            // for reasons the caller cannot tell apart from outside: the wallet was
+            // deleted, it is personal and so unshareable, or it is already at the
+            // 50-member ceiling. An invite that opens none of them is simply spent.
+            if (joinError?.code === 'permission-denied' || joinError?.code === 'not-found') {
+                throw new Error("That invite code is no longer valid");
+            }
+            throw joinError;
+        }
 
         // Separate write: the join rule permits changing `members` and nothing else,
         // so the name goes on afterwards. Failure here is cosmetic, not a failed join.
@@ -455,10 +426,6 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
             });
         } catch {
             /* name will be published on the next wallet switch */
-        }
-
-        if (import.meta.env.DEV) {
-
         }
 
         return walletId;
@@ -472,6 +439,7 @@ export const joinWalletByCode = async (user: User, code: string): Promise<string
             error.message === "Invalid invite data" ||
             error.message === "You are already a member of this wallet" ||
             error.message === "That wallet no longer exists" ||
+            error.message === "That invite code is no longer valid" ||
             error.message === "Sign in before joining a shared wallet"
         ) {
             throw error;
@@ -499,7 +467,14 @@ const getLocalData = (): Expense[] => {
 };
 
 const saveLocalData = (data: Expense[]) => {
-  localStorage.setItem(GUEST_DATA_KEY, JSON.stringify(data));
+  try {
+    localStorage.setItem(GUEST_DATA_KEY, JSON.stringify(data));
+  } catch {
+    // Private browsing, a blocked origin, or a full quota. Guest mode is the default
+    // for a first-time visitor, so the raw DOMException reached the toast verbatim —
+    // "QuotaExceededError: Failed to execute 'setItem'..." — with no hint of a remedy.
+    throw new Error('This device is out of storage space. Sign in to save your expenses to your account, or free up space and try again.');
+  }
 };
 
 /**
@@ -583,16 +558,10 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
     if (user.type === 'guest') {
         mutateLocalData(current => [...current, newExpense]);
 
-        if (import.meta.env.DEV) {
-
-        }
     } else {
         try {
             await setDoc(doc(db, 'wallets', activeWalletId, 'expenses', newExpense.id), newExpense);
             
-            if (import.meta.env.DEV) {
-
-            }
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error saving expense:', {
@@ -642,16 +611,10 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
     if (user.type === 'guest') {
         mutateLocalData(current => current.map(p => p.id === expenseId ? { ...p, ...allowedUpdates } : p));
 
-        if (import.meta.env.DEV) {
-
-        }
     } else {
         try {
             await updateDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId), allowedUpdates);
             
-            if (import.meta.env.DEV) {
-
-            }
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error updating expense:', error);
@@ -728,9 +691,6 @@ export const saveCustomCategories = async (user: User, categories: Category[]): 
                     createdAt: Date.now()
                 });
             }
-            if (import.meta.env.DEV) {
-
-            }
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error saving custom categories:', error);
@@ -744,16 +704,10 @@ export const deleteExpense = async (user: User, activeWalletId: string, expenseI
     if (user.type === 'guest') {
         mutateLocalData(current => current.filter(p => p.id !== expenseId));
 
-        if (import.meta.env.DEV) {
-
-        }
     } else {
         try {
             await deleteDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId));
             
-            if (import.meta.env.DEV) {
-
-            }
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error deleting expense:', error);
@@ -790,9 +744,6 @@ export const clearAllExpenses = async (user: User, walletId: string, ownOnly = f
     if (user.type === 'guest') {
         saveLocalData([]);
 
-        if (import.meta.env.DEV) {
-
-        }
     } else {
         try {
             const expensesRef = collection(db, 'wallets', walletId, 'expenses');
@@ -802,9 +753,6 @@ export const clearAllExpenses = async (user: User, walletId: string, ownOnly = f
 
             await deleteDocsInChunks(snapshot.docs.map(docSnap => docSnap.ref));
 
-            if (import.meta.env.DEV) {
-
-            }
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error clearing expenses:', error);
@@ -940,9 +888,6 @@ export const syncGuestData = async (user: User) => {
         // Nothing usable. Drop damaged leftovers rather than leaving the "not backed
         // up" banner permanently stuck on rows that can never be written.
         if (unmigratable > 0) localStorage.removeItem(GUEST_DATA_KEY);
-        if (import.meta.env.DEV) {
-
-        }
         return;
     }
 
@@ -980,10 +925,6 @@ export const syncGuestData = async (user: User) => {
         // Only now is it safe to drop the local copy.
         localStorage.removeItem(GUEST_DATA_KEY);
         
-        if (import.meta.env.DEV) {
-
-        }
-
         await cleanupDuplicatePersonalWallets(user);
     } catch (error: any) {
         if (import.meta.env.DEV) {
@@ -1104,9 +1045,6 @@ export const deleteAccount = async (user: User): Promise<void> => {
 
     clearLocalData();
 
-    if (import.meta.env.DEV) {
-
-    }
   } catch (error: any) {
     if (import.meta.env.DEV) {
       console.error('Error during account deletion:', error);

@@ -28,10 +28,8 @@ const LOCAL_DATA_KEYS = [
   'kharcha_bachau_guest_v1',
   'kharcha_bachau_active_wallet_id',
   'kharcha_bachau_wallets_cache',
-  'kharcha_bachau_read_notifications',
-  'kharcha_bachau_dismissed_notifications',
-  'kharcha_bachau_notification_preferences',
   'kharcha_bachau_coach_seen',
+  'kharcha_bachau_install_dismissed_v2',
 ];
 
 export const clearLocalData = () => {

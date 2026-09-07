@@ -246,7 +246,7 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
           </div>
           <div className="flex items-center gap-2">
             <input type="date" aria-label="Date" value={format(selectedDate, 'yyyy-MM-dd')} max={todayISO()} onChange={handleDateChange}
-              className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-sm font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[44px]" />
+              className="px-3 py-2 bg-white border border-slate-200 rounded-xl text-base font-medium text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500 min-h-[44px]" />
             <button onClick={safeClose} className="min-w-[44px] min-h-[44px] bg-slate-100 rounded-xl active:scale-95 flex items-center justify-center hover:bg-slate-200 transition-colors focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2" aria-label="Close">
               <X size={20} className="text-slate-600" />
             </button>
@@ -288,7 +288,11 @@ const AddExpenseModal: React.FC<AddExpenseModalProps> = ({ category, isOpen, onC
             </button>
 
             {isSplitMode && (
-              <div className="mt-3 space-y-3 p-4 bg-slate-50 rounded-xl">
+              // Capped and scrollable. The sheet is `overflow-hidden` at a 92vh
+              // ceiling with no scroll container of its own, so an unbounded member
+              // list pushed the keypad and the Save button off the bottom — in a
+              // wallet with half a dozen people the expense could not be saved.
+              <div className="mt-3 space-y-3 p-4 bg-slate-50 rounded-xl max-h-[38vh] overflow-y-auto">
                 <div>
                   <label className="text-xs font-semibold text-slate-700 block mb-2">Who paid?</label>
                   <select value={paidBy} onChange={e => setPaidBy(e.target.value)} className="input">

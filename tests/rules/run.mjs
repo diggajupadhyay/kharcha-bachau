@@ -112,6 +112,17 @@ describe('Wallet join — one member added, nothing else touched (KB-02)');
   check('member leaves', true,
     (await patch(A, `/wallets/${W}`, { members: [B] }, ['members'])).status);
 
+  // KB-60: "leaving" must remove exactly one member — yourself. Unchecked, a member
+  // could submit an empty list and evict everyone, including the owner, who would
+  // then be locked out of reading their own wallet.
+  await resetWallet();
+  check('member leaves and takes everyone else with them', false,
+    (await patch(A, `/wallets/${W}`, { members: [] }, ['members'])).status);
+
+  await resetWallet();
+  check('member leaves and swaps in an outsider', false,
+    (await patch(A, `/wallets/${W}`, { members: [OUTSIDER] }, ['members'])).status);
+
   await resetWallet();
   check('non-owner deletes the wallet', false,
     (await call('DELETE', `/wallets/${W}`, { uid: A })).status);
@@ -193,6 +204,21 @@ describe('Expenses — read and write scope');
     (await call('PATCH', `/wallets/${W}/expenses/e8`, {
       uid: A, body: { fields: (await import('./helpers.mjs')).F({ ...expense('e8', B), walletId: W }) },
     })).status);
+
+  // KB-62: only the known fields may be written. `hasAll` alone let a member pad an
+  // expense out to Firestore's 1 MiB limit, and every other member synced it down.
+  check('expense create carrying an unknown field', false,
+    (await call('PATCH', `/wallets/${W}/expenses/e7`, {
+      uid: A,
+      body: { fields: (await import('./helpers.mjs')).F({ ...expense('e7', A), padding: 'x'.repeat(2000) }) },
+    })).status);
+
+  // KB-63: the 500-character note cap applied on create, but not on update.
+  await seed(`/wallets/${W}/expenses/e6`, expense('e6', A));
+  check('creator stretches a note past 500 characters', false,
+    (await patch(A, `/wallets/${W}/expenses/e6`, { note: 'x'.repeat(501) })).status);
+  check('creator writes a 500-character note', true,
+    (await patch(A, `/wallets/${W}/expenses/e6`, { note: 'x'.repeat(500) })).status);
 }
 
 // ==============================================================================
@@ -226,6 +252,24 @@ describe('Settlements (KB-05, KB-12, KB-53)');
   await resetExpense([sA]);
   check('swapping a settlement for a forged one', false,
     (await patch(A, EXPENSE_PATH, { splitDetails: split([settlement(B, A, A)]) })).status);
+
+  // KB-61: appending is allowed; rewriting what is already there is not. Validating
+  // only the last entry left every earlier settlement editable in the same write.
+  await resetExpense([sA]);
+  check('appending a valid settlement while inflating an older one', false,
+    (await patch(A, EXPENSE_PATH, {
+      splitDetails: split([{ ...sA, amount: 9999 }, settlement(B, A, A)]),
+    })).status);
+
+  await resetExpense([sA]);
+  check('appending a valid settlement in front of the existing one', false,
+    (await patch(A, EXPENSE_PATH, {
+      splitDetails: split([settlement(B, A, B), sA]),
+    })).status);
+
+  await resetExpense([sA]);
+  check('appending a second settlement, leaving the first alone', true,
+    (await patch(A, EXPENSE_PATH, { splitDetails: split([sA, settlement(B, A, A)]) })).status);
 
   // KB-53: a settlement write must not double as a way to rewrite the split.
   await resetExpense(undefined);

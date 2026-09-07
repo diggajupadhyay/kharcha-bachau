@@ -55,7 +55,7 @@ const AppContent: React.FC = () => {
             onClose={() => setNeedRefresh(false)}
           />
 
-          <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar scroll-smooth bg-slate-50/50 overscroll-behavior-y-contain">
+          <main className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden no-scrollbar scroll-smooth bg-slate-50/50 overscroll-y-contain">
             <Suspense fallback={
               <div className="h-full min-h-[60vh] flex items-center justify-center bg-slate-50">
                 <Loader2 className="animate-spin text-emerald-600" size={32} />

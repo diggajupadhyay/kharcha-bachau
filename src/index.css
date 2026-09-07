@@ -83,8 +83,12 @@ button:disabled { cursor: not-allowed; }
   min-width: var(--app-min-tap-target);
 }
 
-/* Prevent iOS zoom on input focus */
-input, select, textarea { font-size: 16px; }
+/* Prevent iOS zoom on input focus. Layered, so `.input`'s own size and any Tailwind
+   text utility on the element still win — unlayered it beat both, and every input in
+   the app silently rendered at 16px whatever it asked for. */
+@layer base {
+  input, select, textarea { font-size: 16px; }
+}
 
 input[type='number']::-webkit-inner-spin-button,
 input[type='number']::-webkit-outer-spin-button {
