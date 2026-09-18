@@ -448,7 +448,7 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     if (!user || !activeWallet) return;
     try {
         const dateStr = date ? format(date, 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd');
-        await storage.addExpense(user, activeWallet.id, {
+        const synced = await storage.addExpense(user, activeWallet.id, {
             categoryId: category.id,
             categoryName: category.name,
             categoryEmoji: category.emoji,
@@ -458,10 +458,10 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             splitDetails,
         });
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-        // Offline the write is queued in Firestore's persistent cache, not acked —
-        // say so, or "Expense added" over a device that hasn't synced reads like
-        // the cloud got it.
-        if (storage.isOffline()) showNotification('info', 'Saved on this device — will sync when back online');
+        // `synced === false` = the write is queued on this device (offline, or a
+        // network Firestore cannot reach), not on the server yet — say so, or
+        // "Expense added" over an unsynced entry reads like the cloud got it.
+        if (synced === false) showNotification('info', 'Saved on this device — will sync when back online');
         else showNotification('success', 'Expense added');
         triggerHaptic();
     } catch (e: any) {
@@ -501,9 +501,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             updates.splitDetails = updatedSplitDetails;
         }
 
-        await storage.updateExpense(user, activeWallet.id, id, updates);
+        const synced = await storage.updateExpense(user, activeWallet.id, id, updates);
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-        if (storage.isOffline()) showNotification('info', 'Updated on this device — will sync when back online');
+        if (synced === false) showNotification('info', 'Updated on this device — will sync when back online');
         else showNotification('success', 'Updated successfully');
         triggerHaptic();
     } catch (e: any) {
@@ -521,9 +521,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const deleteExpense = useCallback(async (id: string) => {
       if (!user || !activeWallet) return;
       try {
-          await storage.deleteExpense(user, activeWallet.id, id);
+          const synced = await storage.deleteExpense(user, activeWallet.id, id);
           if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-          if (storage.isOffline()) showNotification('info', 'Deleted on this device — will sync when back online');
+          if (synced === false) showNotification('info', 'Deleted on this device — will sync when back online');
           else showNotification('info', 'Deleted');
       } catch (e: any) {
           const errorMsg = e?.message || 'Failed to delete';
@@ -537,9 +537,9 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   const restoreExpense = useCallback(async (expense: Expense) => {
       if (!user || !activeWallet) return;
       try {
-          await storage.restoreExpense(user, activeWallet.id, expense);
+          const synced = await storage.restoreExpense(user, activeWallet.id, expense);
           if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-          if (storage.isOffline()) showNotification('info', 'Restored on this device — will sync when back online');
+          if (synced === false) showNotification('info', 'Restored on this device — will sync when back online');
           else showNotification('success', 'Restored');
           triggerHaptic();
       } catch (e: any) {

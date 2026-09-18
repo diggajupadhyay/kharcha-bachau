@@ -535,22 +535,31 @@ const buildExpenseDocument = (
   return doc as unknown as Expense;
 };
 
-export const isOffline = (): boolean =>
-  typeof navigator !== 'undefined' && !navigator.onLine;
+// Grace period to wait for the server acknowledgement before letting the user
+// carry on. Online, an ack lands well inside this; offline (or on a network the
+// OS still calls "online" but Firestore cannot reach), the write promise stays
+// pending for minutes. navigator.onLine deliberately NOT used — it does not
+// track Firestore's real connectivity.
+const SAVE_ACK_TIMEOUT_MS = 3000;
 
-// Offline, a Firestore write promise stays pending until the server acknowledges —
-// which can be minutes. The SDK already queues the write in its persistent cache
-// and syncs it on reconnect, so blocking the UI on the acknowledgement only made
-// the app feel stuck: the sheet sat on "Saving…" until connectivity returned.
-// Online behaviour (await + error surfacing) is unchanged.
-const awaitOrQueue = (write: () => Promise<void>): Promise<void> => {
-  if (!isOffline()) return write();
-  void write().catch((error: any) => {
+// A Firestore write promise resolves only when the server acks, so awaiting it
+// offline hung the sheet on "Saving…". The SDK queues the write in its persistent
+// cache regardless and syncs on reconnect — so we race the ack against a short
+// grace period and report honestly: true = reached the server, false = still
+// queued on this device. A write that rejects before the timeout (e.g.
+// permission-denied) still surfaces to the caller as a normal failure.
+const awaitOrQueue = async (write: () => Promise<void>): Promise<boolean> => {
+  const pending = write();
+  pending.catch((error: any) => {
     if (import.meta.env.DEV) {
-      console.error('Queued offline write failed:', error?.code, error?.message);
+      console.error('Queued expense write failed:', error?.code, error?.message);
     }
   });
-  return Promise.resolve();
+  const acked = await Promise.race([
+    pending.then(() => true),
+    new Promise<boolean>(resolve => setTimeout(() => resolve(false), SAVE_ACK_TIMEOUT_MS)),
+  ]);
+  return acked;
 };
 
 export const addExpense = async (user: User, activeWalletId: string, expense: Omit<Expense, 'id' | 'createdAt' | 'walletId' | 'createdBy'>) => {
@@ -578,8 +587,8 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
 
     } else {
         try {
-            await awaitOrQueue(() => setDoc(doc(db, 'wallets', activeWalletId, 'expenses', newExpense.id), newExpense));
-            
+            const synced = await awaitOrQueue(() => setDoc(doc(db, 'wallets', activeWalletId, 'expenses', newExpense.id), newExpense));
+            return synced;
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error saving expense:', {
@@ -631,8 +640,8 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
 
     } else {
         try {
-            await awaitOrQueue(() => updateDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId), allowedUpdates));
-            
+            const synced = await awaitOrQueue(() => updateDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId), allowedUpdates));
+            return synced;
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error updating expense:', error);
@@ -724,8 +733,8 @@ export const deleteExpense = async (user: User, activeWalletId: string, expenseI
 
     } else {
         try {
-            await awaitOrQueue(() => deleteDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId)));
-            
+            const synced = await awaitOrQueue(() => deleteDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId)));
+            return synced;
         } catch (error: any) {
             if (import.meta.env.DEV) {
                 console.error('Error deleting expense:', error);
@@ -749,7 +758,7 @@ export const restoreExpense = async (user: User, activeWalletId: string, expense
     if (user.type === 'guest') {
         mutateLocalData(current => current.some(p => p.id === expense.id) ? current : [...current, expense]);
     } else {
-        await awaitOrQueue(() => setDoc(doc(db, 'wallets', activeWalletId, 'expenses', expense.id), expense));
+        return awaitOrQueue(() => setDoc(doc(db, 'wallets', activeWalletId, 'expenses', expense.id), expense));
     }
 };
 
