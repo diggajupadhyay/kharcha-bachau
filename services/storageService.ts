@@ -535,6 +535,24 @@ const buildExpenseDocument = (
   return doc as unknown as Expense;
 };
 
+export const isOffline = (): boolean =>
+  typeof navigator !== 'undefined' && !navigator.onLine;
+
+// Offline, a Firestore write promise stays pending until the server acknowledges —
+// which can be minutes. The SDK already queues the write in its persistent cache
+// and syncs it on reconnect, so blocking the UI on the acknowledgement only made
+// the app feel stuck: the sheet sat on "Saving…" until connectivity returned.
+// Online behaviour (await + error surfacing) is unchanged.
+const awaitOrQueue = (write: () => Promise<void>): Promise<void> => {
+  if (!isOffline()) return write();
+  void write().catch((error: any) => {
+    if (import.meta.env.DEV) {
+      console.error('Queued offline write failed:', error?.code, error?.message);
+    }
+  });
+  return Promise.resolve();
+};
+
 export const addExpense = async (user: User, activeWalletId: string, expense: Omit<Expense, 'id' | 'createdAt' | 'walletId' | 'createdBy'>) => {
     // Cloud writes are bounded by the security rules; guest writes are not, so the
     // same limits are applied here for both.
@@ -560,7 +578,7 @@ export const addExpense = async (user: User, activeWalletId: string, expense: Om
 
     } else {
         try {
-            await setDoc(doc(db, 'wallets', activeWalletId, 'expenses', newExpense.id), newExpense);
+            await awaitOrQueue(() => setDoc(doc(db, 'wallets', activeWalletId, 'expenses', newExpense.id), newExpense));
             
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -613,7 +631,7 @@ export const updateExpense = async (user: User, activeWalletId: string, expenseI
 
     } else {
         try {
-            await updateDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId), allowedUpdates);
+            await awaitOrQueue(() => updateDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId), allowedUpdates));
             
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -706,7 +724,7 @@ export const deleteExpense = async (user: User, activeWalletId: string, expenseI
 
     } else {
         try {
-            await deleteDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId));
+            await awaitOrQueue(() => deleteDoc(doc(db, 'wallets', activeWalletId, 'expenses', expenseId)));
             
         } catch (error: any) {
             if (import.meta.env.DEV) {
@@ -731,7 +749,7 @@ export const restoreExpense = async (user: User, activeWalletId: string, expense
     if (user.type === 'guest') {
         mutateLocalData(current => current.some(p => p.id === expense.id) ? current : [...current, expense]);
     } else {
-        await setDoc(doc(db, 'wallets', activeWalletId, 'expenses', expense.id), expense);
+        await awaitOrQueue(() => setDoc(doc(db, 'wallets', activeWalletId, 'expenses', expense.id), expense));
     }
 };
 

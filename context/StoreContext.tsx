@@ -458,7 +458,11 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
             splitDetails,
         });
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-        showNotification('success', 'Expense added');
+        // Offline the write is queued in Firestore's persistent cache, not acked —
+        // say so, or "Expense added" over a device that hasn't synced reads like
+        // the cloud got it.
+        if (storage.isOffline()) showNotification('info', 'Saved on this device — will sync when back online');
+        else showNotification('success', 'Expense added');
         triggerHaptic();
     } catch (e: any) {
         const errorMsg = e?.message || 'Failed to save';
@@ -499,7 +503,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
         await storage.updateExpense(user, activeWallet.id, id, updates);
         if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-        showNotification('success', 'Updated successfully');
+        if (storage.isOffline()) showNotification('info', 'Updated on this device — will sync when back online');
+        else showNotification('success', 'Updated successfully');
         triggerHaptic();
     } catch (e: any) {
         const errorMsg = e?.message || 'Failed to update';
@@ -518,7 +523,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       try {
           await storage.deleteExpense(user, activeWallet.id, id);
           if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-          showNotification('info', 'Deleted');
+          if (storage.isOffline()) showNotification('info', 'Deleted on this device — will sync when back online');
+          else showNotification('info', 'Deleted');
       } catch (e: any) {
           const errorMsg = e?.message || 'Failed to delete';
           showNotification('error', errorMsg);
@@ -533,7 +539,8 @@ export const StoreProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       try {
           await storage.restoreExpense(user, activeWallet.id, expense);
           if (user.type === 'guest') setExpenses(storage.getGuestExpenses());
-          showNotification('success', 'Restored');
+          if (storage.isOffline()) showNotification('info', 'Restored on this device — will sync when back online');
+          else showNotification('success', 'Restored');
           triggerHaptic();
       } catch (e: any) {
           const errorMsg = e?.message || 'Failed to restore';
