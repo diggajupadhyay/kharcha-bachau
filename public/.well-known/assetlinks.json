@@ -1,0 +1,1 @@
+[{"relation": ["delegate_permission/common.handle_all_urls"], "target": {"namespace": "android_app", "package_name": "com.kharchabachau.app", "sha256_cert_fingerprints": ["80:95:34:28:79:FB:B5:1D:9E:35:5E:A0:33:C9:B9:CD:55:02:C2:93:65:3F:C1:E4:C2:B1:A5:1F:06:CF:85:4F"]}}]
