@@ -13,7 +13,7 @@ export BUBBLEWRAP_KEY_PASSWORD=$(grep '^keyPassword=' keystore.properties | cut 
 
 NPMROOT=$(npm root -g)
 node -e "
-const shared = require('$NPMROOT/dist/lib/cmds/shared.js');
+const shared = require('$NPMROOT/@bubblewrap/cli/dist/lib/cmds/shared.js');
 const fs = require('fs');
 fs.writeFileSync('manifest-checksum.txt', shared.computeChecksum(fs.readFileSync('twa-manifest.json')));
 "
