@@ -11,6 +11,7 @@ import { useStore } from '../context/StoreContext';
 import { useAuth } from '../context/AuthContext';
 import { Expense } from '../types';
 import { getCurrencySymbol } from '../utils/currencyFormatter';
+import { useCurrentDate } from '../hooks/useCurrentDate';
 import { getCategoryIcon, parseCategoryColor } from '../utils/categoryIcons';
 import { shiftISODate, parseISODate } from '../utils/date';
 
@@ -25,14 +26,11 @@ export interface FilterState {
   amountRange: { min?: number; max?: number };
 }
 
-interface TrackerProps {
-  currentDate: string;
-}
-
 // Home: wallet summary plus the full transaction list. These used to be two tabs that
 // showed the same numbers twice; adding an expense now happens only through the + in
 // the nav bar, so the category grid that used to live here is gone.
-const Tracker: React.FC<TrackerProps> = ({ currentDate }) => {
+const Tracker: React.FC = () => {
+  const currentDate = useCurrentDate();
   const {
     expenses, monthlyStats, activeWallet, budget, isSyncing,
     markSettlement, getAllCategories, deleteExpense, restoreExpense, showNotification,

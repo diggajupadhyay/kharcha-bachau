@@ -33,24 +33,31 @@
 }
 
 html, body {
-  overflow-x: hidden;
   width: 100%;
   max-width: 100%;
   margin: 0;
   padding: 0;
 }
 
+/* overflow-x lives on <html> alone. It used to be on html, body AND #root, which
+   turned all three into scroll containers (overflow-y computes to auto); combined
+   with body's overscroll-behavior-y: none the wheel scroll chain was cut at body —
+   a container that never scrolls — and mouse/touchpad scrolling died on any
+   document-scrolled page (the landing). html alone still clips horizontal overflow
+   at the viewport. */
+html {
+  overflow-x: hidden;
+}
+
 body {
   background-color: #f8fafc;
   font-family: 'Plus Jakarta Sans', sans-serif;
   -webkit-tap-highlight-color: transparent;
-  overscroll-behavior-y: none;
   /* Slightly larger base size: friendlier for young children and seniors */
   font-size: 17px;
 }
 
 #root {
-  overflow-x: hidden;
   width: 100%;
   max-width: 100%;
 }

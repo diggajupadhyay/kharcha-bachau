@@ -33,8 +33,10 @@ export default defineConfig({
         id: '/',
         name: 'Kharcha Bachau',
         short_name: 'Kharcha Bachau',
-        description: 'Smart daily expense tracker for Nepal.',
-        start_url: '/',
+        description: 'Free daily expense tracker that works offline.',
+        // /app so the installed PWA opens into the tracker, not the landing page.
+        // id stays '/' so existing installs keep their identity.
+        start_url: '/app',
         scope: '/',
         lang: 'en',
         dir: 'ltr',

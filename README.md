@@ -1,7 +1,7 @@
 # Kharcha Bachau — Expense Tracker 🇳🇵
 
 **Kharcha Bachau** (खर्च बचाउ — "save expenses" in Nepali) is a Progressive Web App for
-daily expense tracking, built for Nepal. It works offline, stores data on your device by
+daily expense tracking, built in Nepal and usable anywhere. It works offline, stores data on your device by
 default, and can optionally sync to the cloud and be shared with a household or travel
 group.
 
@@ -29,6 +29,9 @@ group.
 ## What it does
 
 ### Core
+- **Landing page.** `/` shows a landing page for new visitors; the app lives at `/app`.
+  Returning visitors are redirected there automatically, and the installed PWA opens
+  straight into it.
 - **Works without an account.** Expenses are written to `localStorage`. No sign-up.
 - **Optional cloud sync.** Google sign-in migrates local expenses into a Firestore
   personal wallet and keeps them in sync across devices.
@@ -190,10 +193,11 @@ Hosting headers (CSP, HSTS, `X-Frame-Options`, `nosniff`) are configured in
 ## Project structure
 
 ```
-App.tsx                    Root layout, providers, router, bottom nav
+App.tsx                    Router, service worker registration, landing redirect
+AppShell.tsx               App layout — providers, bottom nav, PWA prompts
 index.tsx                  Entry point
 
-pages/                     Route components (Tracker, History, SettingsPage, Privacy)
+pages/                     Route components (Landing, Tracker, SettingsPage, Privacy)
 components/                Shared UI — modals, dialogs, banners, error boundary
 context/
   AuthContext.tsx          Firebase auth + guest identity
