@@ -185,18 +185,26 @@ const Landing: React.FC = () => {
         <section className="px-4 pb-16 sm:px-6 sm:pb-24">
           <div className="mx-auto w-full max-w-5xl rounded-3xl bg-slate-900 px-6 py-12 text-center sm:px-12 sm:py-16">
             <h2 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
-              Android app in the works
+              Get the Android app
             </h2>
             <p className="mx-auto mt-4 max-w-xl leading-relaxed text-slate-300">
-              Kharcha Bachau for Android is planned. Until then, add the web app to your home
-              screen — it installs from the browser and works offline the same way.
+              Download the APK and install it, or add the web app to your home screen and
+              use it in the browser — both work offline and share the same data.
             </p>
-            <Link
-              {...appLink}
-              className="mt-8 inline-flex h-11 items-center justify-center rounded-xl bg-white/10 px-5 text-[15px] font-bold text-white transition-colors hover:bg-white/15"
-            >
-              Open the web app
-            </Link>
+            <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
+              <a
+                href="/release/"
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-emerald-500 px-6 text-[15px] font-bold text-white transition-colors hover:bg-emerald-400"
+              >
+                Download APK
+              </a>
+              <Link
+                {...appLink}
+                className="inline-flex h-11 items-center justify-center rounded-xl bg-white/10 px-5 text-[15px] font-bold text-white transition-colors hover:bg-white/15"
+              >
+                Open the web app
+              </Link>
+            </div>
           </div>
         </section>
 
