@@ -2,19 +2,6 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { Smartphone, WifiOff, Users, Divide, PiggyBank, Download, ChevronDown } from 'lucide-react';
 
-// Prefetch the app bundle when a link to /app is hovered, focused or pressed,
-// so loading starts before navigation commits.
-const preloadApp = () => {
-  void import('../AppShell');
-};
-
-const appLink = {
-  to: '/app' as const,
-  onMouseEnter: preloadApp,
-  onFocus: preloadApp,
-  onPointerDown: preloadApp,
-};
-
 const FEATURES: Array<{ icon: typeof Smartphone; title: string; text: string }> = [
   {
     icon: Smartphone,
@@ -108,10 +95,10 @@ const Landing: React.FC = () => {
             <span className="text-[17px] font-bold tracking-tight">Kharcha Bachau</span>
           </Link>
           <Link
-            {...appLink}
+            to="/release/"
             className="inline-flex h-10 items-center rounded-xl bg-emerald-600 px-4 text-[15px] font-bold text-white transition-all hover:bg-emerald-700 active:scale-[0.97] focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
           >
-            Open App
+            Get the App
           </Link>
         </div>
       </header>
@@ -130,8 +117,8 @@ const Landing: React.FC = () => {
             your device, and needs no account.
           </p>
           <div className="mt-8 flex justify-center">
-            <Link {...appLink} className="btn-primary w-full max-w-xs sm:w-auto">
-              Start tracking — free
+            <Link to="/release/" className="btn-primary w-full max-w-xs sm:w-auto">
+              Get the Android app — free
             </Link>
           </div>
         </section>
@@ -188,8 +175,8 @@ const Landing: React.FC = () => {
               Get the Android app
             </h2>
             <p className="mx-auto mt-4 max-w-xl leading-relaxed text-slate-300">
-              Download the APK and install it, or add the web app to your home screen and
-              use it in the browser — both work offline and share the same data.
+              Download the APK and install it — free, works offline, and your data stays on
+              your device.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <a
@@ -198,12 +185,6 @@ const Landing: React.FC = () => {
               >
                 Download APK
               </a>
-              <Link
-                {...appLink}
-                className="inline-flex h-11 items-center justify-center rounded-xl bg-white/10 px-5 text-[15px] font-bold text-white transition-colors hover:bg-white/15"
-              >
-                Open the web app
-              </Link>
             </div>
           </div>
         </section>

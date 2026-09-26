@@ -1,1 +1,1 @@
-[{"relation": ["delegate_permission/common.handle_all_urls"], "target": {"namespace": "android_app", "package_name": "com.kharchabachau.app", "sha256_cert_fingerprints": ["80:95:34:28:79:FB:B5:1D:9E:35:5E:A0:33:C9:B9:CD:55:02:C2:93:65:3F:C1:E4:C2:B1:A5:1F:06:CF:85:4F"]}}]
+[{"relation": ["delegate_permission/common.handle_all_urls"], "target": {"namespace": "android_app", "package_name": "com.kharchabachau.app", "sha256_cert_fingerprints": ["26:99:44:F1:12:F2:5D:C9:DC:37:5B:73:F4:2A:D7:EA:AD:64:FA:CA:42:69:97:24:8E:80:FC:66:D4:03:42:E4"]}}]

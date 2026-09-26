@@ -1,6 +1,5 @@
 import { Component, ErrorInfo, ReactNode } from 'react';
 import { AlertCircle, RefreshCw } from 'lucide-react';
-import { clearLocalData } from '../utils/localData';
 
 interface Props {
   children: ReactNode;
@@ -75,16 +74,6 @@ class ErrorBoundary extends Component<Props, State> {
   // Last resort for a crash that repeats on every load — corrupt data persisted in
   // local storage, for instance. Without this the only escape is clearing site data
   // through browser settings, which a non-technical user will not find.
-  handleClearData = () => {
-    const confirmed = window.confirm(
-      'This deletes the expenses saved on this device and starts fresh. ' +
-      'Anything already backed up to your account is not affected. Continue?'
-    );
-    if (!confirmed) return;
-    clearLocalData();
-    window.location.reload();
-  };
-
   render() {
     if (this.state.hasError) {
       return (
@@ -136,18 +125,6 @@ class ErrorBoundary extends Component<Props, State> {
               Reload Page
             </button>
 
-            <div className="mt-6 pt-5 border-t border-slate-200">
-              <p className="text-xs text-slate-500 mb-3 leading-relaxed">
-                Still not working after reloading? You can clear the data saved on this
-                device and start again. Anything backed up to your account stays safe.
-              </p>
-              <button
-                onClick={this.handleClearData}
-                className="w-full bg-white text-rose-700 border border-rose-200 px-6 py-3 rounded-xl font-semibold hover:bg-rose-50 transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
-              >
-                Clear data on this device
-              </button>
-            </div>
           </div>
         </div>
       );
