@@ -78,12 +78,19 @@ jobs:
 
       - run: npm run build:all
 
+      # The official CLI rather than a third-party action: the service-account
+      # credentials work identically locally and here, so there is no wrapper whose
+      # input format or tag naming can break a deploy.
+      - name: Write the service account
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s' "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > "$RUNNER_TEMP/firebase-adminsdk.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-adminsdk.json" >> "$GITHUB_ENV"
+
+      - run: npm install -g firebase-tools@latest
       - name: Deploy to Firebase Hosting
-        uses: w9jds/firebase-action@v12
-        with:
-          args: deploy --only hosting --project ${{ secrets.FIREBASE_PROJECT_ID }}
-        env:
-          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+        run: firebase deploy --only hosting --project ${{ secrets.FIREBASE_PROJECT_ID }}
 
 # Android is deliberately absent. The release signing key is not in this repository
 # and not in these secrets, so nothing here can produce an installable build. Signed

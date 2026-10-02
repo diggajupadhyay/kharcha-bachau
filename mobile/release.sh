@@ -91,6 +91,16 @@ TAG="v$VERSION"
 APK_NAME="kharcha-bachau-$VERSION-$COMMIT.apk"
 AAB_NAME="kharcha-bachau-$VERSION-$COMMIT.aab"
 
+# GitHub can only tag a commit it already has. Publishing from an unpushed commit
+# fails with a bare "Release.target_commitish is invalid", which is a confusing way to
+# learn that the source for the release is sitting on this machine and nowhere else.
+git -C .. fetch --quiet origin
+if ! git -C .. merge-base --is-ancestor "$FULL_COMMIT" "origin/$(git -C .. rev-parse --abbrev-ref HEAD)"; then
+  echo "ERROR: commit $COMMIT is not on the remote yet, so GitHub cannot tag it." >&2
+  echo "       Push it first:  git push origin $(git -C .. rev-parse --abbrev-ref HEAD)" >&2
+  exit 1
+fi
+
 STAGE=$(mktemp -d)
 trap 'rm -rf "$STAGE"' EXIT
 cp "$APK" "$STAGE/$APK_NAME"
