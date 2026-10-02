@@ -1,4 +1,4 @@
-import { getApps, type FirebaseApp } from '@react-native-firebase/app';
+import type { FirebaseApp } from '@react-native-firebase/app';
 import {
   getAuth, onAuthStateChanged, signInWithCredential, signOut,
   GoogleAuthProvider, type Auth,
@@ -9,9 +9,8 @@ import {
   arrayUnion, onSnapshot, query, where, limit, writeBatch,
   type Firestore, type Unsubscribe, type WriteBatch, type DocumentReference,
 } from '@react-native-firebase/firestore';
-import { GoogleOneTapSignIn } from 'react-native-nitro-google-signin';
-import { Platform } from 'react-native';
 
+import { clearGoogleSession, requestGoogleIdToken } from './googleAuth';
 import { Wallet, Expense, Category, SettlementRecord } from './types';
 
 /**
@@ -23,19 +22,32 @@ import { Wallet, Expense, Category, SettlementRecord } from './types';
  * required by the build even for guest-only installs.
  */
 
-// The native SDK auto-initialises the default app from google-services.json, so
-// there is normally nothing to construct here. When it is absent the usual cause is
-// that google-services.json registers a different package name than the app builds
-// under — say so plainly rather than failing later with an opaque auth error.
-const [initialised] = getApps();
-if (!initialised) {
-  throw new Error(
-    'Firebase did not initialise. Check that google-services.json exists and that its '
-    + 'package_name matches this app\'s android package.'
-  );
-}
-export const firebaseApp: FirebaseApp = initialised;
-export const auth: Auth = getAuth(firebaseApp);
+import { firebaseApp } from './firebaseApp';
+
+/**
+ * Firebase handles, resolved on first use rather than at import.
+ *
+ * They used to be module-level constants, which meant importing this file started
+ * Firebase. That is wrong on a phone too — a guest with no account and no network
+ * should never pay for a cloud client it will not use — and it is impossible in a
+ * browser, where initialisation is asynchronous and a module-scope `getAuth` would
+ * run before the app exists and cache a broken client for the life of the page.
+ */
+let handles: { auth: Auth; db: Firestore } | null = null;
+
+export const probeCloud = (): void => { fb(); };
+
+const fb = (): { auth: Auth; db: Firestore } => {
+  if (handles) return handles;
+  const app = firebaseApp;
+  if (!app) {
+    throw new Error(
+      'Cloud sync is not configured in this build. The app works without an account.'
+    );
+  }
+  handles = { auth: getAuth(app), db: getFirestore(app) };
+  return handles;
+};
 
 /**
  * The native Firestore SDK manages its own SQLite-backed cache and enables it by
@@ -45,7 +57,7 @@ export const auth: Auth = getAuth(firebaseApp);
  * silently degrades to a memory-only cache and every unsynced write is lost when
  * the app is backgrounded.
  */
-export const db: Firestore = getFirestore(firebaseApp);
+
 
 /** Firestore error codes are not on the TS error type. */
 const codeOf = (e: unknown): string =>
@@ -62,7 +74,7 @@ const commitInChunks = async <T>(
   apply: (batch: WriteBatch, item: T) => void
 ): Promise<void> => {
   for (let i = 0; i < items.length; i += BATCH_CHUNK_SIZE) {
-    const batch = writeBatch(db);
+    const batch = writeBatch(fb().db);
     items.slice(i, i + BATCH_CHUNK_SIZE).forEach(item => apply(batch, item));
     await batch.commit();
   }
@@ -73,10 +85,10 @@ const deleteDocsInChunks = (refs: DocumentReference[]): Promise<void> =>
 
 // ---- Paths -----------------------------------------------------------------
 
-const walletRef = (walletId: string) => doc(db, 'wallets', walletId);
-const expensesRef = (walletId: string) => collection(db, 'wallets', walletId, 'expenses');
-const inviteRef = (code: string) => doc(db, 'invites', code);
-const userRef = (userId: string) => doc(db, 'users', userId);
+const walletRef = (walletId: string) => doc(fb().db, 'wallets', walletId);
+const expensesRef = (walletId: string) => collection(fb().db, 'wallets', walletId, 'expenses');
+const inviteRef = (code: string) => doc(fb().db, 'invites', code);
+const userRef = (userId: string) => doc(fb().db, 'users', userId);
 
 export type CloudUnsubscribe = Unsubscribe;
 
@@ -88,15 +100,6 @@ export interface CloudUser {
   email: string;
 }
 
-let googleConfigured = false;
-
-const configureGoogle = (): void => {
-  if (googleConfigured) return;
-  // 'autoDetect' reads default_web_client_id out of google-services.json, so the
-  // client id does not have to be duplicated in app.json.
-  GoogleOneTapSignIn.configure({ webClientId: 'autoDetect' });
-  googleConfigured = true;
-};
 
 /**
  * Signs in with Google.
@@ -108,71 +111,43 @@ const configureGoogle = (): void => {
  * to a silent null left the button appearing to do nothing at all.
  */
 export const signInWithGoogle = async (): Promise<CloudUser | null> => {
-  configureGoogle();
-
   try {
-    if (Platform.OS === 'android') {
-      // Rejects up front with a resolvable Play Services problem, rather than a
-      // confusing failure deep inside Credential Manager.
-      await GoogleOneTapSignIn.checkPlayServices(true);
-    }
+    // Where the credential comes from is platform-specific: Credential Manager on a
+    // phone, a popup in a browser. What happens next is identical *except* that the
+    // browser popup has already signed the user in, so there is nothing left to
+    // exchange — feeding its result to signInWithCredential would hand Firebase a UID
+    // where it expects a Google ID token and fail.
+    const credential = await requestGoogleIdToken();
+    if (!credential) return null;   // a deliberate back-out is the only silent case
 
-    const response = await GoogleOneTapSignIn.signIn();
+    const profile = credential.alreadySignedIn
+      ? fb().auth.currentUser
+      : (await signInWithCredential(
+          fb().auth,
+          GoogleAuthProvider.credential(credential.idToken)
+        )).user;
 
-    // Only a deliberate back-out is silent. Everything else — no credential on the
-    // device, a misconfigured OAuth client, Play Services missing — must surface,
-    // or the primary button in the app looks broken.
-    if (response.type === 'cancelled') return null;
-
-    if (response.type !== 'success' || !response.data?.idToken) {
-      throw new Error(googleSignInHint(response.type));
-    }
-
-    const credential = GoogleAuthProvider.credential(response.data.idToken);
-    const result = await signInWithCredential(auth, credential);
-
-    const profile = result.user;
     if (!profile) throw new Error('Google sign-in did not return an account');
 
     return {
       uid: profile.uid,
-      displayName: profile.displayName || response.data.user?.name || 'You',
-      email: profile.email || response.data.user?.email || '',
+      displayName: profile.displayName || credential.name || 'You',
+      email: profile.email || credential.email || '',
     };
   } catch (e: any) {
-    // A missing/unregistered signing fingerprint is by far the most common cause
-    // and the least guessable, so say so rather than showing a generic failure.
-    const detail = e?.message ? String(e.message) : googleSignInHint('unknown');
-    throw new Error(`Google sign-in failed. ${detail}`);
-  }
-};
-
-const googleSignInHint = (type: string): string => {
-  switch (type) {
-    case 'cancelled':
-      return 'Sign-in was cancelled.';
-    case 'noSavedCredentialFound':
-      // Credential Manager reports a misconfigured OAuth client — an unregistered
-      // signing fingerprint, or a package name that does not match — under this same
-      // code as "no account on the device". The two are indistinguishable from the
-      // client, so name both rather than send the user hunting for the wrong thing.
-      return 'Either no Google account is on this device, or the app\'s signing '
-        + 'fingerprint is not registered with Firebase yet (that takes a few minutes '
-        + 'to take effect).';
-    default:
-      return 'Please try again in a moment.';
+    throw new Error(`Google sign-in failed. ${e?.message ?? 'Please try again.'}`);
   }
 };
 
 export const signOutCloud = async (): Promise<void> => {
-  await signOut(auth);
-  try { await GoogleOneTapSignIn.signOut(); } catch { /* nothing to clear */ }
+  await signOut(fb().auth);
+  try { await clearGoogleSession(); } catch { /* nothing to clear */ }
 };
 
 export const subscribeToAuth = (
   handler: (user: CloudUser | null) => void
 ): Unsubscribe =>
-  onAuthStateChanged(auth, (user) => {
+  onAuthStateChanged(fb().auth, (user) => {
     if (!user) { handler(null); return; }
     handler({
       uid: user.uid,
@@ -216,7 +191,7 @@ export const setCustomCategories = async (
 export const createCloudWallet = async (
   user: CloudUser, name: string, isPersonal: boolean
 ): Promise<string> => {
-  const ref = doc(collection(db, 'wallets'));
+  const ref = doc(collection(fb().db, 'wallets'));
   await setDoc(ref, {
     id: ref.id,
     name,
@@ -237,7 +212,7 @@ export const subscribeToWallets = (
   userId: string, handler: (wallets: Wallet[]) => void
 ): Unsubscribe =>
   onSnapshot(
-    query(collection(db, 'wallets'), where('members', 'array-contains', userId)),
+    query(collection(fb().db, 'wallets'), where('members', 'array-contains', userId)),
     snap => {
       const wallets = snap.docs.map(d => {
         const data = d.data() as Wallet;
@@ -261,7 +236,7 @@ export const subscribeToWallets = (
   );
 
 export const getWallets = async (userId: string): Promise<Wallet[]> => {
-  const snap = await getDocs(query(collection(db, 'wallets'), where('members', 'array-contains', userId)));
+  const snap = await getDocs(query(collection(fb().db, 'wallets'), where('members', 'array-contains', userId)));
   return snap.docs.map(d => ({ ...(d.data() as Wallet), id: d.id }) as Wallet);
 };
 

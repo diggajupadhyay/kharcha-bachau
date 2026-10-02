@@ -12,7 +12,9 @@
     "deploy:indexes": "firebase deploy --only firestore:indexes",
     "deploy:firestore": "firebase deploy --only firestore",
     "deploy:hosting": "firebase deploy --only hosting",
-    "test": "npm test --prefix mobile"
+    "test": "npm test --prefix mobile",
+    "build:webapp": "./scripts/build-webapp.sh",
+    "build:all": "npm run build && npm run build:webapp"
   },
   "dependencies": {
     "date-fns": "^4.1.0",

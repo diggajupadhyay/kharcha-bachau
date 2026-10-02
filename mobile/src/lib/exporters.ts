@@ -1,9 +1,8 @@
 import { Expense, Wallet, Category, BackupData } from './types';
 import { format } from 'date-fns';
-import { File, Paths } from 'expo-file-system';
-import * as Sharing from 'expo-sharing';
 import { getCurrencySymbol } from './money';
 import { buildBackup, validateBackup } from './backup';
+import { readTextFile, saveAndShare } from './fileTransfer';
 
 const CURRENCY = getCurrencySymbol();
 
@@ -45,23 +44,9 @@ export const buildCSV = (expenses: Expense[]): string => {
   return [headers.map(h => `"${h}"`).join(','), ...rows].join('\n');
 };
 
-const shareFile = async (contents: string, fileName: string, mimeType: string): Promise<void> => {
-  const file = new File(Paths.cache, fileName);
-  // BOM for UTF-8 so the CSV opens correctly in Excel.
-  file.write(mimeType === 'text/csv' ? '\uFEFF' + contents : contents);
-  try {
-    if (!(await Sharing.isAvailableAsync())) {
-      throw new Error('Sharing is not available on this device');
-    }
-    await Sharing.shareAsync(file.uri, { mimeType, dialogTitle: fileName });
-  } finally {
-    file.delete();
-  }
-};
-
 export const exportCSV = async (expenses: Expense[]): Promise<void> => {
   if (!expenses || expenses.length === 0) throw new Error('No expenses to export');
-  await shareFile(
+  await saveAndShare(
     buildCSV(expenses),
     `kharcha_bachau_export_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`,
     'text/csv'
@@ -76,7 +61,7 @@ export const exportBackup = async (
   appVersion: string
 ): Promise<void> => {
   const contents = buildBackup(expenses, wallet, budget, customCategories, appVersion);
-  await shareFile(
+  await saveAndShare(
     contents,
     `kharcha_bachau_backup_${format(new Date(), 'yyyyMMdd_HHmmss')}.json`,
     'application/json'
@@ -94,17 +79,7 @@ export const readBackupFile = async (fileUri: string, fileSize?: number): Promis
   if (fileSize !== undefined && fileSize > MAX_BACKUP_BYTES) {
     throw new Error('That backup file is too large to open (over 25 MB).');
   }
-  let text: string;
-  try {
-    const file = new File(fileUri);
-    text = await file.text();
-  } catch (error) {
-    if (error instanceof Error && error.message.includes('large')) throw error;
-    throw new Error('Failed to read backup file');
-  }
-  if (text.length > MAX_BACKUP_BYTES) {
-    throw new Error('That backup file is too large to open (over 25 MB).');
-  }
+  const text = await readTextFile(fileUri, MAX_BACKUP_BYTES);
   let data: unknown;
   try {
     data = JSON.parse(text);

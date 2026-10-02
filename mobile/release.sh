@@ -70,16 +70,34 @@ echo "Signature verified: $ACTUAL_SHA256"
 
 # Ship: render the download page (served by Firebase at /release/) and deploy the
 # APK to Cloudflare Workers static assets (forced-download header included).
+#
+# Every artifact is stamped with the commit it was built from, so a download page can
+# be traced back to exact source. The APK is published under both its commit name and
+# a `latest` alias: the commit name is what the page links to, and `latest` is what
+# existing links and bookmarks point at, so old references never 404.
 VERSION=$(node -pe "require('../app.json').expo.version")
 SIZE=$(numfmt --to=iec --suffix=B "$(stat -c%s $APK)")
+COMMIT=$(git -C ../ rev-parse --short HEAD)
+DATE=$(date +%d\ %b\ %Y)
+APK_NAME="kharcha-bachau-$COMMIT.apk"
+
 mkdir -p ../../public/release
-sed -e "s/@@VERSION@@/$VERSION/g" -e "s/@@SIZE@@/$SIZE/g" ../../release-page.html > ../../public/release/index.html
+sed -e "s/@@VERSION@@/$VERSION/g" \
+    -e "s/@@SIZE@@/$SIZE/g" \
+    -e "s/@@SHORTCOMMIT@@/$COMMIT/g" \
+    -e "s/@@DATE@@/$DATE/g" \
+    ../../release-page.html > ../../public/release/index.html
+
 mkdir -p ../../release-cf/dist
+cp "$APK" "../../release-cf/dist/$APK_NAME"
 cp "$APK" ../../release-cf/dist/kharcha-bachau-latest.apk
-printf '/kharcha-bachau-latest.apk\n  Content-Disposition: attachment; filename="kharcha-bachau-latest.apk"\n' > ../../release-cf/dist/_headers
+{
+  echo "/*.apk"
+  echo "  Content-Disposition: attachment"
+} > ../../release-cf/dist/_headers
 (cd ../../release-cf && npx wrangler deploy)
 
 echo ""
-echo "Release shipped: v$VERSION ($SIZE)"
+echo "Release shipped: v$VERSION ($SIZE) from $COMMIT"
 echo "  AAB: $AAB"
 echo "Next: npm run deploy:hosting  (from the repo root)"

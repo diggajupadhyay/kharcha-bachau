@@ -48,7 +48,8 @@ mobile/keystore/
 mobile/android/keystore.properties
 mobile/android/app/release.keystore
 mobile/android/local.properties
-mobile/release-cf/dist/
+release-cf/dist/
+mobile/out/
 public/release/*.apk
 
 # Firebase mobile config — regenerated per environment from the Firebase console.

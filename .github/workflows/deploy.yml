@@ -1,0 +1,212 @@
+name: Deploy
+
+# Publishing runs on the default branch. The repository's default is `master`; if it
+# is ever renamed, this trigger needs to change with it or nothing will deploy.
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm ci --prefix mobile
+      - run: npx tsc --noEmit
+      - run: npm test --prefix mobile
+
+  web:
+    name: Build web app and landing page
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # Firebase config is inlined into the bundle at build time. Without it the web
+      # build still works, but in guest mode with no cloud sync — so this step fails
+      # loudly rather than shipping that silently.
+      - name: Load Firebase config for the web bundle
+        run: |
+          set -a; . ./.env; set +a
+          echo "::add-mask::${VITE_FIREBASE_API_KEY}"
+          {
+            echo "EXPO_PUBLIC_FIREBASE_API_KEY=${VITE_FIREBASE_API_KEY}"
+            echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=${VITE_FIREBASE_AUTH_DOMAIN}"
+            echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=${VITE_FIREBASE_PROJECT_ID}"
+            echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=${VITE_FIREBASE_STORAGE_BUCKET}"
+            echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${VITE_FIREBASE_MESSAGING_SENDER_ID}"
+            echo "EXPO_PUBLIC_FIREBASE_APP_ID=${VITE_FIREBASE_APP_ID}"
+          } >> "$GITHUB_ENV"
+
+      # Order matters: Vite empties dist/, so the landing page is built first and the
+      # web app is written into dist/app afterwards.
+      - run: npm run build:all
+      - uses: actions/upload-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+          retention-days: 7
+
+  deploy-hosting:
+    name: Deploy site and /app
+    needs: web
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: web-dist
+          path: dist
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install -g firebase-tools
+
+      - name: Deploy to Firebase Hosting
+        uses: w9jds/firebase-action@v12
+        with:
+          args: deploy --only hosting --project ${{ secrets.FIREBASE_PROJECT_ID }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+
+  android:
+    name: Build Android release
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # release.sh stamps artifacts with the commit
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci --prefix mobile
+
+      - name: Restore signing material
+        env:
+          KEYSTORE_B64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+          KEYSTORE_PROPS: ${{ secrets.KEYSTORE_PROPERTIES }}
+          GOOGLE_SERVICES: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_B64}" ] || [ -z "${KEYSTORE_PROPS}" ] || [ -z "${GOOGLE_SERVICES}" ]; then
+            echo "::warning::Signing secrets are not configured. Building an unsigned bundle only."
+            echo "  Add RELEASE_KEYSTORE_BASE64, KEYSTORE_PROPERTIES and GOOGLE_SERVICES_JSON"
+            echo "  as repository secrets to produce an installable release."
+            exit 0
+          fi
+          mkdir -p mobile/keystore mobile/android/app
+          printf '%s' "$KEYSTORE_B64" | base64 -d > mobile/keystore/release.keystore
+          printf '%s' "$KEYSTORE_PROPS" > mobile/keystore/keystore.properties
+          printf '%s' "$GOOGLE_SERVICES" > mobile/google-services.json
+
+      - name: Build bundle and APK
+        run: |
+          set -euo pipefail
+          cd mobile/android
+          ./gradlew bundleRelease assembleRelease \
+            -PreactNativeArchitectures=arm64-v8a --no-daemon
+
+      - name: Collect artifacts
+        run: |
+          set -euo pipefail
+          SHORT=$(git rev-parse --short HEAD)
+          mkdir -p out
+          cp android/app/build/outputs/bundle/release/app-release.aab "out/kharcha-bachau-$SHORT.aab"
+          cp android/app/build/outputs/apk/release/app-release.apk  "out/kharcha-bachau-$SHORT.apk"
+          ls -la out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-release
+          path: mobile/out
+          retention-days: 30
+
+  # Publishes the APK to Cloudflare, where the /release/ page links from. Skipped
+  # unless signing secrets exist, because an unsigned or debug-signed APK is worse
+  # than no APK: it installs but can never be updated in place.
+  deploy-apk:
+    name: Publish APK download
+    needs: [android, check]
+    if: ${{ success() && secrets.RELEASE_KEYSTORE_BASE64 != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Download the built APK
+        uses: actions/download-artifact@v4
+        with:
+          name: android-release
+          path: in
+
+      - name: Verify it is release-signed
+        run: |
+          set -euo pipefail
+          SHORT=$(git rev-parse --short HEAD)
+          APK="in/kharcha-bachau-$SHORT.apk"
+          BT=$(ls -d "${ANDROID_HOME}"/build-tools/*/ 2>/dev/null | sort -V | tail -1)
+          mkdir -p keystore
+          printf '%s' "${{ secrets.RELEASE_KEYSTORE_BASE64 }}" | base64 -d > keystore/release.keystore
+          printf '%s' "${{ secrets.KEYSTORE_PROPERTIES }}" > keystore/keystore.properties
+          EXPECTED=$(keytool -list -v -keystore keystore/release.keystore \
+            -storepass "$(grep '^storePassword=' keystore/keystore.properties | cut -d= -f2)" \
+            -alias "$(grep '^keyAlias=' keystore/keystore.properties | cut -d= -f2)" 2>/dev/null \
+            | grep 'SHA256:' | sed 's/.*SHA256: //; s/://g' | tr '[:upper:]' '[:lower:]')
+          ACTUAL=$("$BT"/apksigner verify --print-certs "$APK" 2>/dev/null \
+            | grep -i 'SHA-256 digest' | head -1 | awk '{print $NF}' | tr '[:upper:]' '[:lower:]')
+          if [ -z "$ACTUAL" ]; then echo "::error::Could not read the signing certificate"; exit 1; fi
+          if [ "$EXPECTED" != "$ACTUAL" ]; then echo "::error::Wrong signing key — refusing to publish"; exit 1; fi
+          echo "Signature verified: $ACTUAL"
+
+      - name: Render the download page and stage the APK
+        run: |
+          set -euo pipefail
+          SHORT=$(git rev-parse --short HEAD)
+          APK="in/kharcha-bachau-$SHORT.apk"
+          VERSION=$(node -pe "require('./mobile/app.json').expo.version")
+          SIZE=$(numfmt --to=iec --suffix=B "$(stat -c%s "$APK")")
+          DATE=$(date +%d\ %b\ %Y)
+          mkdir -p public/release release-cf/dist
+          sed -e "s/@@VERSION@@/$VERSION/g" -e "s/@@SIZE@@/$SIZE/g" \
+              -e "s/@@SHORTCOMMIT@@/$SHORT/g" -e "s/@@DATE@@/$DATE/g" \
+              release-page.html > public/release/index.html
+          cp "$APK" "release-cf/dist/kharcha-bachau-$SHORT.apk"
+          cp "$APK" release-cf/dist/kharcha-bachau-latest.apk
+          printf '/*.apk\n  Content-Disposition: attachment\n' > release-cf/dist/_headers
+
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: release-cf
+          command: deploy
+
+      - name: Push the download page
+        run: npx firebase-tools deploy --only hosting --project ${{ secrets.FIREBASE_PROJECT_ID }}
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}

@@ -25,9 +25,15 @@ export const getCloud = (): CloudModule => {
   }
 };
 
-/** True when Firebase is present and usable, without throwing. */
+/**
+ * True when Firebase is present and usable, without throwing.
+ *
+ * Probes the cloud module rather than merely importing it: since the Firebase
+ * handles became lazy, a successful import no longer proves anything is configured,
+ * and the app must still fall back to guest mode when it is not.
+ */
 export const cloudAvailable = (): boolean => {
-  try { getCloud(); return true; } catch { return false; }
+  try { getCloud().probeCloud(); return true; } catch { return false; }
 };
 
 export type SessionUser =

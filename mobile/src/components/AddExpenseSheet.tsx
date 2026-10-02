@@ -4,7 +4,6 @@ import {
   KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useWindowDimensions } from 'react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
 import { Category } from '../lib/types';
 import { useStore } from '../store';
 import { getCurrencySymbol, formatAmount } from '../lib/money';
@@ -14,6 +13,7 @@ import { Icon } from './Icon';
 import { useSheetDrag } from '../lib/useSheetDrag';
 import { useScrollTop } from '../lib/useScrollTop';
 import { SheetHandle, SheetPanel } from './Sheet';
+import DatePicker from './DatePicker';
 import { todayISO } from '../lib/date';
 import { calculateEqualShares, isSplitSumValid } from '../lib/split';
 
@@ -391,14 +391,7 @@ const AddExpenseSheet: React.FC<AddExpenseSheetProps> = ({ isOpen, onClose }) =>
                   </Pressable>
                 </View>
                 {showDatePicker && (
-                  <DateTimePicker
-                    value={selectedDate}
-                    mode="date"
-                    display={Platform.OS === 'android' ? 'default' : 'compact'}
-                    maximumDate={new Date()}
-                    minimumDate={new Date(2000, 0, 1)}
-                    onChange={onDateChange}
-                  />
+                  <DatePicker value={selectedDate} onChange={onDateChange} />
                 )}
 
                 {/* Split — hidden entirely for a single-person wallet, since there

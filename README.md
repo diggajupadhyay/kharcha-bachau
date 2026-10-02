@@ -17,6 +17,7 @@ wallets you can invite people into.
 ## Contents
 
 - [What it does](#what-it-does)
+- [Web app and Android](#web-app-and-android)
 - [Getting started](#getting-started)
 - [Project layout](#project-layout)
 - [Architecture](#architecture)
@@ -57,6 +58,14 @@ ledger rather than as a failure.
 **Appearance.** Light and dark themes, following the system by default or pinned in Settings.
 
 ---
+
+## Web app and Android
+
+One codebase, two builds. The web version at `/app` is the same React Native source as the
+Android app, run through `react-native-web` — so the two are identical by construction, not
+by discipline. Only five modules differ, each behind a `.web.tsx` twin: Google sign-in,
+export/restore, the date picker, the sign-in button, and Firebase initialisation. See
+[DEPLOY.md](DEPLOY.md) for how that works and how to ship it.
 
 ## Getting started
 

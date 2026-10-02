@@ -96,7 +96,8 @@
     <span class="pill">Android</span>
     <h1>Get the app on your phone</h1>
     <p class="meta"><b>v@@VERSION@@</b> · @@SIZE@@ · Free</p>
-    <a class="download" href="https://kharcha-bachau-release.dcozupadhyay.workers.dev/kharcha-bachau-latest.apk" download>Download APK</a>
+    <p class="meta">Build <b>@@SHORTCOMMIT@@</b> · released @@DATE@@</p>
+    <a class="download" href="https://kharcha-bachau-release.dcozupadhyay.workers.dev/kharcha-bachau-@@SHORTCOMMIT@@.apk" download>Download APK</a>
   </section>
 
   <section class="steps wrap">
@@ -122,7 +123,7 @@
         <p>Open the downloaded file and confirm. Your data stays on your device.</p>
       </div>
     </div>
-    <p class="note"><b>Already installed?</b> Downloading a new version and installing it over the old one keeps your data.</p>
+    <p class="note"><b>Already installed?</b> Downloading a new version and installing it over the old one keeps your data. Every build is signed with the same key, so Android accepts it as an update rather than a second app.</p>
   </section>
 </main>
 
@@ -135,7 +136,7 @@
     <div class="right">
       <a href="/privacy">Privacy</a>
       <span>Made in Nepal</span>
-      <span>v@@VERSION@@</span>
+      <span>v@@VERSION@@ · @@SHORTCOMMIT@@</span>
     </div>
   </div>
 </footer>

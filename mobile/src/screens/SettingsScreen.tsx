@@ -19,7 +19,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import ConfirmDialog from '../components/ConfirmDialog';
 import WalletSelector from '../components/WalletSelector';
 import { useAuth, cloudAvailable } from '../AuthContext';
-import { GoogleSignInButton } from 'react-native-nitro-google-signin';
+import GoogleSignInButton from '../components/GoogleSignInButton';
 
 const SettingsScreen: React.FC = () => {
   const {
