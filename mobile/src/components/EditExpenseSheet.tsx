@@ -1,11 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Modal, View, Text, Pressable, TextInput, StyleSheet, KeyboardAvoidingView, Platform,
+  Modal, View, Text, Pressable, TextInput, StyleSheet, ScrollView, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { useWindowDimensions } from 'react-native';
 import { Expense } from '../lib/types';
 import { useStore } from '../store';
 import { getCurrencySymbol } from '../lib/money';
-import { colors, radius, parseCategoryColor } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
+import { type, space, radius, getCategoryTint } from '../lib/tokens';
+import { Icon } from './Icon';
+import { useSheetDrag } from '../lib/useSheetDrag';
+import { useScrollTop } from '../lib/useScrollTop';
+import { SheetHandle, SheetPanel } from './Sheet';
 
 interface EditExpenseSheetProps {
   expense: Expense | null;
@@ -52,38 +58,67 @@ const EditExpenseSheet: React.FC<EditExpenseSheetProps> = ({ expense, isOpen, on
     }
   };
 
-  const tile = expense ? parseCategoryColor(
-    // The category color is not stored on the expense; the sheet used to hardcode
-    // the rose tile. Resolving from the expense's own fields keeps it consistent.
-    expense.categoryId === 'other' ? 'bg-gray-100 text-gray-600' : undefined
-  ) : { bg: colors.slate100, text: colors.slate600 };
+  const { theme } = useTheme();
+
+  // The category colour is not stored on the expense, so it is resolved from the
+  // category id — the same source Home uses, so the tile matches the list row.
+  const tile = expense
+    ? getCategoryTint(expense.categoryId, theme.name)
+    : getCategoryTint('other', theme.name);
+
+  const st = useMemo(() => StyleSheet.create({
+    scrim: { backgroundColor: theme.scrim },
+    panel: { backgroundColor: theme.surface },
+    heading: { ...type.heading, color: theme.text },
+    caption: { ...type.caption, color: theme.textTertiary },
+    closeButton: { backgroundColor: theme.surfaceSunken },
+    label: { ...type.label, color: theme.textSecondary },
+    amountInput: { color: theme.text },
+    noteInput: {
+      backgroundColor: theme.surfaceSunken, borderColor: theme.border, color: theme.text,
+    },
+    errorText: { ...type.caption, color: theme.negative },
+    saveButton: { backgroundColor: theme.accent },
+    saveLabel: { ...type.label, color: theme.textOnAccent },
+    currencyPrefix: { color: theme.textTertiary },
+  }), [theme]);
+
+  // Bounded in pixels, not percent: a percentage maxHeight does not resolve inside
+  // a Modal, so the sheet would size to its content and overflow the screen.
+  const { height: windowHeight } = useWindowDimensions();
+  const panelMaxHeight = Math.round(windowHeight * 0.92);
+
+  // Placed before the JSX so the gesture is available to the panel and handle.
+  const { atTop, onScroll } = useScrollTop(isOpen);
+  const { translateY, panHandlers, onPanelLayout } = useSheetDrag(isOpen, onClose, atTop);
 
   return (
     <Modal visible={isOpen} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex1}>
-        <View style={styles.scrim}>
+        <View style={[styles.scrim, st.scrim]}>
           <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
-          <View style={styles.panel}>
-            <View style={styles.dragHandle} />
+          <SheetPanel translateY={translateY} panHandlers={panHandlers} onLayout={onPanelLayout} style={[styles.panel, st.panel, { height: panelMaxHeight }]}>
+            <SheetHandle />
             <View style={styles.headerRow}>
               <View style={[styles.tileIcon, { backgroundColor: tile.bg }]}>
                 <Text style={styles.tileEmoji}>{expense?.categoryEmoji}</Text>
               </View>
               <View style={styles.flex1}>
-                <Text style={styles.heading}>Edit Transaction</Text>
-                <Text style={styles.caption}>Update the details below</Text>
+                <Text style={[st.heading]}>Edit expense</Text>
+                <Text style={[st.caption]}>Amount and note only</Text>
               </View>
-              <Pressable onPress={onClose} style={styles.closeButton} hitSlop={8} android_ripple={{ color: '#f1f5f9', radius: 24 }}>
-                <Text style={styles.closeIcon}>✕</Text>
+              <Pressable onPress={onClose} style={[styles.closeButton, st.closeButton]} hitSlop={8} android_ripple={{ color: theme.surfacePressed, radius: 24 }} accessibilityRole="button" accessibilityLabel="Close">
+                <Icon name="x" size={18} color="" theme={theme} tone="muted" strokeWidth={2.4} />
               </Pressable>
             </View>
 
-            <View style={styles.body}>
-              <Text style={styles.label}>Amount</Text>
+            <ScrollView style={styles.bodyScroll} contentContainerStyle={styles.body} keyboardShouldPersistTaps="handled" onScroll={onScroll}>
+              <View>
+              <Text style={[styles.label, st.label]}>Amount</Text>
               <View style={styles.amountRow}>
-                <Text style={styles.currencyPrefix}>{currencySymbol}</Text>
+                <Text style={[st.currencyPrefix]}>{currencySymbol}</Text>
                 <TextInput
-                  style={styles.amountInput}
+                  style={[st.amountInput]}
                   value={amount}
                   onChangeText={text => { setAmount(text); if (error) setError(''); }}
                   onSubmitEditing={handleUpdate}
@@ -92,124 +127,116 @@ const EditExpenseSheet: React.FC<EditExpenseSheetProps> = ({ expense, isOpen, on
                   selectTextOnFocus
                 />
               </View>
-              {error ? <Text style={styles.errorText}>{error}</Text> : null}
+              {error ? <Text style={[st.errorText]}>{error}</Text> : null}
 
-              <Text style={styles.label}>Note</Text>
+              <Text style={[styles.label, st.label]}>Note</Text>
               <TextInput
-                style={styles.noteInput}
+                style={[st.noteInput]}
                 value={note}
                 onChangeText={setNote}
                 maxLength={500}
                 placeholder="Add a note (optional)"
-                placeholderTextColor={colors.slate500}
+                placeholderTextColor={theme.textTertiary}
               />
 
+              </View>
+            </ScrollView>
+            <View style={styles.footer}>
               <Pressable
                 onPress={handleUpdate}
                 disabled={isSaving}
-                style={({ pressed }) => [styles.saveButton, pressed && styles.savePressed]}
+                style={({ pressed }) => [styles.saveButton, st.saveButton, pressed && styles.savePressed]}
                 android_ripple={{ color: 'rgba(255,255,255,0.2)' }}
+                accessibilityRole="button"
+                accessibilityLabel="Update expense"
               >
-                <Text style={styles.saveLabel}>{isSaving ? 'Saving…' : 'Update'}</Text>
+                <Text style={[st.saveLabel]}>{isSaving ? 'Saving…' : 'Update'}</Text>
               </Pressable>
             </View>
-          </View>
+          </SheetPanel>
         </View>
       </KeyboardAvoidingView>
     </Modal>
   );
 };
 
+/** Layout only. Every colour is supplied by the themed `st` above. */
 const styles = StyleSheet.create({
-  flex1: { flex: 1 },
-  scrim: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.6)',
-    justifyContent: 'flex-end',
-  },
+  scrim: { flex: 1, justifyContent: 'flex-end' },
   panel: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radius.card,
-    borderTopRightRadius: radius.card,
-    paddingBottom: 24,
-  },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: colors.slate200,
-    alignSelf: 'center',
-    marginTop: 12,
-    marginBottom: 8,
+    borderTopLeftRadius: radius.xl,
+    borderTopRightRadius: radius.xl,
+    paddingBottom: space.xxl,
   },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingBottom: 8,
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingBottom: space.sm,
   },
   tileIcon: {
     width: 40,
     height: 40,
-    borderRadius: 12,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
   },
   tileEmoji: { fontSize: 20 },
-  heading: { fontSize: 18, fontWeight: '700', color: colors.slate900 },
-  caption: { fontSize: 14, color: colors.slate600, marginTop: 2 },
-  closeButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: colors.slate100,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeIcon: { fontSize: 16, color: colors.slate600, fontWeight: '600' },
-  body: { paddingHorizontal: 16, paddingTop: 8, gap: 6 },
-  label: { fontSize: 15, fontWeight: '600', color: colors.slate700, marginTop: 8 },
+  flex1: { flex: 1 },
+
+  bodyScroll: { flex: 1 },
+  body: { paddingHorizontal: space.lg, gap: space.sm, paddingTop: space.sm, paddingBottom: space.lg },
+  // The action lives outside the scroll area so it is always visible and always a
+  // full-size target, however long the note gets.
+  footer: { paddingHorizontal: space.lg, paddingTop: space.sm, paddingBottom: space.xl },
+  label: { marginTop: space.xs },
+
   amountRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: space.sm,
     minHeight: 56,
-    borderWidth: 2,
-    borderColor: colors.slate300,
-    borderRadius: radius.input,
-    backgroundColor: colors.white,
-    paddingHorizontal: 14,
-    gap: 6,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
   },
-  currencyPrefix: { fontSize: 16, fontWeight: '700', color: colors.slate500 },
+  currencyPrefix: { fontSize: 19, fontWeight: '600' },
   amountInput: {
     flex: 1,
-    fontSize: 22,
+    fontSize: 28,
     fontWeight: '700',
-    color: colors.slate900,
-    paddingVertical: 12,
+    letterSpacing: -0.5,
+    paddingVertical: 0,
   },
-  errorText: { fontSize: 13, color: colors.rose600, marginLeft: 4 },
+
   noteInput: {
     minHeight: 48,
-    borderWidth: 2,
-    borderColor: colors.slate300,
-    borderRadius: radius.input,
-    backgroundColor: colors.white,
-    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderRadius: radius.md,
+    paddingHorizontal: space.md,
     fontSize: 16,
-    color: colors.slate900,
   },
+
   saveButton: {
-    minHeight: 56,
-    borderRadius: radius.button,
-    backgroundColor: colors.emerald600,
+    minHeight: 48,
+    flexShrink: 0,
+    borderRadius: radius.md,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 16,
+    marginTop: space.md,
   },
-  savePressed: { transform: [{ scale: 0.98 }], backgroundColor: colors.emerald700 },
-  saveLabel: { fontSize: 17, fontWeight: '700', color: colors.white },
+  saveLabel: {},
+  savePressed: { transform: [{ scale: 0.98 }] },
+
+  closeButton: {
+    width: 44,
+    height: 44,
+    borderRadius: radius.md,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
 
 export default EditExpenseSheet;

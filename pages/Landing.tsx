@@ -5,13 +5,13 @@ import { Smartphone, WifiOff, Users, Divide, PiggyBank, Download, ChevronDown } 
 const FEATURES: Array<{ icon: typeof Smartphone; title: string; text: string }> = [
   {
     icon: Smartphone,
-    title: 'Works without an account',
-    text: 'Open the app and start tracking. Expenses are saved to your device by default, with no sign-up.',
+    title: 'No account needed',
+    text: 'Open the app and start tracking. Expenses are saved on your device — no sign-up, no email.',
   },
   {
     icon: WifiOff,
     title: 'Works offline',
-    text: 'After your first visit the app is cached and opens without a network connection.',
+    text: 'The whole app works with no connection. Log expenses on a plane and it syncs when you land.',
   },
   {
     icon: Users,
@@ -21,7 +21,7 @@ const FEATURES: Array<{ icon: typeof Smartphone; title: string; text: string }> 
   {
     icon: Divide,
     title: 'Split expenses',
-    text: 'Split equally, choose who paid, and see exactly who owes whom.',
+    text: 'Split equally, choose who paid, and see exactly who owes whom — then settle up.',
   },
   {
     icon: PiggyBank,
@@ -53,22 +53,31 @@ const STEPS = [
 const FAQS: Array<{ q: string; a: React.ReactNode }> = [
   {
     q: 'Is Kharcha Bachau free?',
-    a: 'Yes. Every feature, including shared wallets and exports, is free.',
+    a: 'Yes. Every feature, including shared wallets, splitting and exports, is free. There is no paid tier and no in-app purchase.',
   },
   {
     q: 'Do I need an account?',
-    a: 'No. Expenses are stored on your device by default. Signing in with Google is optional and keeps everything in sync across your devices.',
+    a: (
+      <>
+        No. Expenses are stored on your device by default and never leave it. Signing in with Google is
+        optional and adds cloud sync across your devices plus invite codes for shared wallets.
+      </>
+    ),
   },
   {
     q: 'Does it work offline?',
-    a: 'Yes. After your first visit, the app is cached and opens without a network connection.',
+    a: 'Yes. Every feature works with no connection. If you are signed in, changes sync to the cloud when you are back online.',
+  },
+  {
+    q: 'What happens to my data if I sign in later?',
+    a: 'Everything already on your device is moved up to your account automatically. Nothing is lost, and nothing is sent anywhere until you choose to sign in.',
   },
   {
     q: 'Who can see my expenses?',
     a: (
       <>
-        Only you. Data stays on your device unless you sync or share a wallet, and shared wallets
-        are visible only to their members. Details in the{' '}
+        Only you, unless you invite someone to a shared wallet — members of a shared wallet can see
+        the expenses logged to it. Details in the{' '}
         <Link
           to="/privacy"
           className="font-semibold text-emerald-600 underline underline-offset-2 hover:text-emerald-700"
@@ -113,8 +122,8 @@ const Landing: React.FC = () => {
             Know where your money goes.
           </h1>
           <p className="mx-auto mt-5 max-w-2xl text-lg leading-relaxed text-slate-600 sm:text-xl">
-            Kharcha Bachau is a free daily expense tracker that works offline, keeps your data on
-            your device, and needs no account.
+            Kharcha Bachau is a free daily expense tracker that works offline, needs no account,
+            and keeps your data on your device until you choose to sync it.
           </p>
           <div className="mt-8 flex justify-center">
             <Link to="/release/" className="btn-primary w-full max-w-xs sm:w-auto">
@@ -175,8 +184,8 @@ const Landing: React.FC = () => {
               Get the Android app
             </h2>
             <p className="mx-auto mt-4 max-w-xl leading-relaxed text-slate-300">
-              Download the APK and install it — free, works offline, and your data stays on
-              your device.
+              Download the APK and install it — free, works fully offline, and needs no account
+              to get started.
             </p>
             <div className="mt-8 flex flex-col items-center justify-center gap-3 sm:flex-row">
               <a

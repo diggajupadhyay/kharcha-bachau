@@ -107,7 +107,11 @@ describe('calculateMemberBalances', () => {
     expect(balances.u1 + balances.u2 + balances.u3).toBe(0);
   });
 
-  it('ignores members not in the wallet', () => {
+  // Previously these participants were skipped because they were not in
+  // wallet.members. That leaked money: u1 kept the full 100 credit while u2's
+  // 50 was never debited, so the books summed to 50 with nobody owing it. A debt
+  // does not stop existing when someone leaves, so they stay on the books.
+  it('keeps a participant who is not in the wallet on the books', () => {
     const balances = calculateMemberBalances(wallet, [
       expense('1', 100, split('u1', [
         { userId: 'u1', amount: 50 },
@@ -115,11 +119,18 @@ describe('calculateMemberBalances', () => {
       ]))
     ]);
     expect(balances.u1).toBeCloseTo(50, 5);
-    expect(balances).not.toHaveProperty('ghost');
+    expect(balances.ghost).toBeCloseTo(-50, 5);
+    expect(balances.u1 + balances.ghost).toBeCloseTo(0, 5);
   });
 
-  it('returns empty object when wallet is null', () => {
-    expect(calculateMemberBalances(null, [expense('1', 100, split('u1', [{ userId: 'u1', amount: 100 }]))])).toEqual({});
+  it('still seeds the wallets own members at zero when there are no splits', () => {
+    expect(calculateMemberBalances(wallet, [])).toEqual({ u1: 0, u2: 0, u3: 0 });
+  });
+
+  it('works with a null wallet by using the split itself for membership', () => {
+    expect(calculateMemberBalances(null, [
+      expense('1', 100, split('u1', [{ userId: 'u1', amount: 100 }]))
+    ])).toEqual({ u1: 0 });
   });
 
   it('rounds floating-point drift to 2 decimals', () => {

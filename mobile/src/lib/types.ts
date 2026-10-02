@@ -34,6 +34,7 @@ export interface Wallet {
   currency: string;
   createdAt: number;
   isPersonal?: boolean; // true = personal-only wallet (not shareable), false/undefined = shared wallet
+  budget?: number; // monthly spending limit, stored on the wallet
   inviteCode?: string; // set once for shared wallets; lets members look the code up without listing /invites
   // uid -> display name. users/{uid} is readable only by its owner, so without this
   // there is no way to show a member's name until they happen to log an expense.
@@ -45,6 +46,20 @@ export interface Category {
   name: string;
   emoji: string;
   color: string;
+}
+
+export interface SplitParticipant {
+  userId: string;
+  userName: string;
+  amount: number; // Amount this person owes
+}
+
+export interface SettlementRecord {
+  fromUserId: string;
+  toUserId: string;
+  amount: number;
+  settledAt: number;
+  settledBy: string; // User ID who marked it as settled
 }
 
 export interface Expense {
@@ -63,37 +78,16 @@ export interface Expense {
   createdAt: number;
   splitDetails?: {
     splitType: 'equal';
-    participants: Array<{
-      userId: string;
-      userName: string;
-      amount: number; // Amount this person owes
-    }>;
+    participants: SplitParticipant[];
     paidBy: string; // User ID who paid
-    settlements?: Array<{
-      fromUserId: string;
-      toUserId: string;
-      amount: number;
-      settledAt: number;
-      settledBy: string; // User ID who marked it as settled
-    }>; // Track which debts have been paid
+    settlements?: SettlementRecord[]; // Track which debts have been paid
   };
 }
 
-export interface Settlement {
-  id: string;
-  expenseId: string;
-  fromUserId: string;
-  toUserId: string;
-  amount: number;
-  settled: boolean;
-  settledAt?: number;
-  walletId: string;
-}
-
 export type SplitDetails = Expense['splitDetails'];
+/** The same shape, guaranteed present — for code that has already checked. */
+export type Split = NonNullable<SplitDetails>;
 
 export interface MonthlyStats {
   currentMonthSpending: number;
 }
-
-export interface Notification2 {}

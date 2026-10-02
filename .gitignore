@@ -50,3 +50,8 @@ mobile/android/app/release.keystore
 mobile/android/local.properties
 mobile/release-cf/dist/
 public/release/*.apk
+
+# Firebase mobile config — regenerated per environment from the Firebase console.
+# Not a secret (the API key is public by design; the Firestore rules are the
+# security boundary), but kept out of the repo so a fork cannot target this project.
+mobile/google-services.json

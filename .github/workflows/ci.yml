@@ -1,0 +1,102 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  web:
+    name: Landing site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
+
+  mobile:
+    name: Android app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - run: npm ci
+      - working-directory: mobile
+        run: npm ci
+
+      # Type check and unit tests are fast and catch the majority of regressions.
+      - working-directory: mobile
+        run: npm run typecheck
+      - working-directory: mobile
+        run: npm test
+
+      # Surfaces incompatible native dependency versions before a release build.
+      # Not fatal: a patch bump can trip this without anything being broken, and a
+      # red X on the job hides the failures that actually matter.
+      - working-directory: mobile
+        run: npx expo-doctor || true
+
+      # app.json points android.googleServicesFile at this path, and both it and
+      # android/ are gitignored, so a fresh runner has neither. Gradle's Firebase
+      # plugin fails the build on a missing file even for an unsigned debug APK.
+      # This is a syntactically valid stand-in: enough to prove the native build
+      # still works, and never used for a real build.
+      - name: Write placeholder google-services.json
+        working-directory: mobile
+        run: |
+          cat > google-services.json <<'JSON'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "ci-placeholder",
+              "storage_bucket": "ci-placeholder.appspot.com"
+            },
+            "client": [
+              {
+                "client_info": {
+                  "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                  "android_client_info": { "package_name": "com.kharchabachau.app" }
+                },
+                "oauth_client": [],
+                "api_key": [{ "current_key": "ci-placeholder-not-a-real-key" }],
+                "services": { "appinvite_service": { "other_platform_oauth_client": [] } }
+              }
+            ],
+            "configuration_version": "1"
+          }
+          JSON
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      # Generate the native project. android/ is gitignored, so `./gradlew` cannot
+      # be invoked directly on a fresh checkout.
+      - name: Prebuild native project
+        working-directory: mobile
+        run: npx expo prebuild --platform android --no-install
+
+      # The signing keystore is deliberately absent, so this only ever produces an
+      # unsigned build — enough to prove the app still compiles and to fail loudly
+      # if a native dependency breaks the build.
+      - name: Assemble debug APK
+        working-directory: mobile/android
+        run: ./gradlew :app:assembleDebug --no-daemon
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-debug-apk
+          path: mobile/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

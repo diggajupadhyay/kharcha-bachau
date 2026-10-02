@@ -1,6 +1,8 @@
 import React from 'react';
 import { Modal, View, Text, Pressable, StyleSheet } from 'react-native';
-import { colors, radius } from '../lib/theme';
+import { useTheme } from '../lib/theme-context';
+import { type, space, radius } from '../lib/tokens';
+import { PrimaryButton, SecondaryButton } from './primitives';
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -15,105 +17,60 @@ interface ConfirmDialogProps {
 
 const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isOpen, title, message, confirmLabel, cancelLabel = 'Cancel', destructive, onConfirm, onCancel,
-}) => (
-  <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onCancel}>
-    <View style={styles.scrim}>
-      <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} />
-      <View style={styles.panel}>
-        <Text style={styles.title}>{title}</Text>
-        <Text style={styles.message}>{message}</Text>
-        <View style={styles.actions}>
-          <Pressable
-            onPress={onCancel}
-            style={({ pressed }) => [styles.button, styles.cancelButton, pressed && styles.pressed]}
-            android_ripple={{ color: '#f1f5f9' }}
-          >
-            <Text style={styles.cancelLabel}>{cancelLabel}</Text>
-          </Pressable>
-          <Pressable
-            onPress={onConfirm}
-            style={({ pressed }) => [
-              styles.button,
-              destructive ? styles.destructiveButton : styles.confirmButton,
-              pressed && styles.pressed,
-            ]}
-            android_ripple={{ color: 'rgba(255,255,255,0.2)' }}
-          >
-            <Text style={destructive ? styles.destructiveLabel : styles.confirmLabel}>{confirmLabel}</Text>
-          </Pressable>
+}) => {
+  const { theme } = useTheme();
+
+  return (
+    <Modal visible={isOpen} transparent animationType="fade" onRequestClose={onCancel}>
+      <View style={{ flex: 1, backgroundColor: theme.scrim, justifyContent: 'center', padding: space.xl }}>
+        <Pressable style={StyleSheet.absoluteFill} onPress={onCancel} accessibilityRole="button" accessibilityLabel="Dismiss" />
+        <View
+          accessibilityViewIsModal
+          style={{
+            width: '100%',
+            maxWidth: 360,
+            backgroundColor: theme.surface,
+            borderRadius: radius.xl,
+            padding: space.xl,
+          }}
+        >
+          <Text style={[type.heading, { color: theme.text }]}>{title}</Text>
+          <Text style={[type.body, { color: theme.textSecondary, lineHeight: 23, marginTop: space.sm }]}>
+            {message}
+          </Text>
+          {/*
+            Cancel is on the left and confirm on the right, but the destructive
+            confirm is rendered with the negative token rather than the accent so a
+            permanent deletion never looks like an ordinary save.
+          */}
+          <View style={{ flexDirection: 'row', gap: space.sm, marginTop: space.xl }}>
+            <SecondaryButton label={cancelLabel} onPress={onCancel} style={{ flex: 1 }} />
+            {destructive ? (
+              <Pressable
+                onPress={onConfirm}
+                android_ripple={{ color: 'rgba(255,255,255,0.25)' }}
+                accessibilityRole="button"
+                accessibilityLabel={confirmLabel}
+                style={({ pressed }) => ({
+                  flex: 1,
+                  minHeight: 48,
+                  borderRadius: radius.md,
+                  backgroundColor: theme.negative,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  opacity: pressed ? 0.85 : 1,
+                })}
+              >
+                <Text style={[type.label, { color: '#fff' }]}>{confirmLabel}</Text>
+              </Pressable>
+            ) : (
+              <PrimaryButton label={confirmLabel} onPress={onConfirm} style={{ flex: 1 }} />
+            )}
+          </View>
         </View>
       </View>
-    </View>
-  </Modal>
-);
-
-const styles = StyleSheet.create({
-  scrim: {
-    flex: 1,
-    backgroundColor: 'rgba(15,23,42,0.6)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 24,
-  },
-  panel: {
-    width: '100%',
-    maxWidth: 360,
-    backgroundColor: colors.white,
-    borderRadius: radius.card,
-    padding: 24,
-  },
-  title: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: colors.slate900,
-  },
-  message: {
-    fontSize: 15,
-    color: colors.slate600,
-    lineHeight: 22,
-    marginTop: 8,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 24,
-  },
-  button: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: radius.button,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 16,
-  },
-  cancelButton: {
-    backgroundColor: colors.slate100,
-  },
-  confirmButton: {
-    backgroundColor: colors.emerald600,
-  },
-  destructiveButton: {
-    backgroundColor: colors.rose600,
-  },
-  cancelLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.slate700,
-  },
-  confirmLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  destructiveLabel: {
-    fontSize: 15,
-    fontWeight: '700',
-    color: colors.white,
-  },
-  pressed: {
-    opacity: 0.85,
-    transform: [{ scale: 0.98 }],
-  },
-});
+    </Modal>
+  );
+};
 
 export default ConfirmDialog;
