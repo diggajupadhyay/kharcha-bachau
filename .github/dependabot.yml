@@ -1,0 +1,9 @@
+# Version bumps are handled deliberately alongside a release rather than as
+# standalone pull requests. On a repository this small, an auto-PR per
+# transitive package produced five PRs the moment the repo was created, all
+# for packages that did not need changing.
+#
+# Security updates stay on: dependabot_security_updates is enabled in the repo's
+# security settings, and those still open PRs on their own.
+version: 2
+updates: []

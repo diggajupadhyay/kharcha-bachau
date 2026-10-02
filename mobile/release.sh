@@ -68,36 +68,57 @@ if [ "$ACTUAL_SHA256" != "$EXPECTED_SHA256" ]; then
 fi
 echo "Signature verified: $ACTUAL_SHA256"
 
-# Ship: render the download page (served by Firebase at /release/) and deploy the
-# APK to Cloudflare Workers static assets (forced-download header included).
+# Ship: render the download page and publish the artifacts as a GitHub Release.
 #
-# Every artifact is stamped with the commit it was built from, so a download page can
-# be traced back to exact source. The APK is published under both its commit name and
-# a `latest` alias: the commit name is what the page links to, and `latest` is what
-# existing links and bookmarks point at, so old references never 404.
+# Artifacts live on GitHub Releases rather than a CDN. The APK is 30 MiB, which is
+# past Cloudflare Workers' 25 MiB limit for static assets, and Firebase's Spark plan
+# rejects executables outright — and Firebase App Distribution is not a download link
+# you can put on a web page. Release assets have no such ceiling and are versioned by
+# the release tag, so a download page can be traced to exact source.
+#
+# Naming: kharcha-bachau-<version>-<short commit>. The commit is in the asset name so a
+# file someone is holding is identifiable, and the release tag is the app version, so
+# /releases/latest/ always resolves to the newest build.
 VERSION=$(node -pe "require('../app.json').expo.version")
 SIZE=$(numfmt --to=iec --suffix=B "$(stat -c%s $APK)")
-COMMIT=$(git -C ../ rev-parse --short HEAD)
+COMMIT=$(git -C .. rev-parse --short HEAD)
 DATE=$(date +%d\ %b\ %Y)
-APK_NAME="kharcha-bachau-$COMMIT.apk"
+REPO=$(git -C .. remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')
+TAG="v$VERSION"
+APK_NAME="kharcha-bachau-$VERSION-$COMMIT.apk"
+AAB_NAME="kharcha-bachau-$VERSION-$COMMIT.aab"
 
-mkdir -p ../../public/release
+STAGE=$(mktemp -d)
+trap 'rm -rf "$STAGE"' EXIT
+cp "$APK" "$STAGE/$APK_NAME"
+cp "$AAB" "$STAGE/$AAB_NAME"
+
+NOTES=$(cat <<EOF
+Kharcha Bachau v$VERSION — build \`$COMMIT\`.
+
+- APK ($SIZE, arm64) for direct install
+- AAB for Play Console upload
+
+Android \`$TAG\` · targetSdk 36 · arm64-v8a, armeabi-v7a, x86, x86_64 in the AAB
+EOF
+)
+
+if gh release view "$TAG" >/dev/null 2>&1; then
+  echo "Release $TAG exists — replacing its assets."
+  gh release delete "$TAG" --yes --cleanup-tag
+fi
+gh release create "$TAG" "$STAGE/$APK_NAME#$APK_NAME" "$STAGE/$AAB_NAME#$AAB_NAME" \
+  --repo "$REPO" --title "Kharcha Bachau $TAG" --notes "$NOTES" --target "$COMMIT"
+
+mkdir -p ../public/release
 sed -e "s/@@VERSION@@/$VERSION/g" \
     -e "s/@@SIZE@@/$SIZE/g" \
     -e "s/@@SHORTCOMMIT@@/$COMMIT/g" \
     -e "s/@@DATE@@/$DATE/g" \
-    ../../release-page.html > ../../public/release/index.html
-
-mkdir -p ../../release-cf/dist
-cp "$APK" "../../release-cf/dist/$APK_NAME"
-cp "$APK" ../../release-cf/dist/kharcha-bachau-latest.apk
-{
-  echo "/*.apk"
-  echo "  Content-Disposition: attachment"
-} > ../../release-cf/dist/_headers
-(cd ../../release-cf && npx wrangler deploy)
+    ../release-page.html > ../public/release/index.html
 
 echo ""
-echo "Release shipped: v$VERSION ($SIZE) from $COMMIT"
-echo "  AAB: $AAB"
+echo "Release shipped: $TAG ($SIZE) from $COMMIT"
+echo "  APK: $APK_NAME"
+echo "  AAB: $AAB_NAME  <- upload this to the Play Console"
 echo "Next: npm run deploy:hosting  (from the repo root)"

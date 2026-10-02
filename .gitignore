@@ -48,7 +48,6 @@ mobile/keystore/
 mobile/android/keystore.properties
 mobile/android/app/release.keystore
 mobile/android/local.properties
-release-cf/dist/
 mobile/out/
 public/release/*.apk
 

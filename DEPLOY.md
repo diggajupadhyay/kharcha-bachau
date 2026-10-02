@@ -10,8 +10,11 @@ carries only its own half and neither has conditionals littered through shared c
 kharchabachau.web.app/            landing page (Vite, repo root)
 kharchabachau.web.app/app         the app, web build of the React Native source
 kharchabachau.web.app/release     APK download page, stamped with the commit
-<workers>.dev/kharcha-bachau-<sha>.apk
+github.com/diggajupadhyay/kharcha-bachau/releases   the APK and AAB themselves
 ```
+
+The site and the app are both on Firebase Hosting. The APK is not, and cannot be —
+see [Where the APK lives](#where-the-apk-lives).
 
 ---
 
@@ -126,42 +129,58 @@ If sign-in fails in production with a blank popup, this policy is the first thin
 `.github/workflows/deploy.yml` runs on every push to the default branch (`master`).
 Its jobs are deliberately ordered so nothing is published before it has been checked:
 
-| Job | What it does |
-|---|---|
-| `check` | typecheck and the test suite |
-| `web` | builds the landing page and the web app, uploads `dist/` |
-| `deploy-hosting` | publishes `dist/` to Firebase Hosting |
-| `android` | builds the `.aab` and `.apk`, uploads them as artifacts |
-| `deploy-apk` | verifies the signing key, renders `/release/`, publishes the APK |
+Two jobs: `check` runs the typecheck and tests, and `deploy` publishes the site only if
+they pass. The deploy step asserts that the web bundle really has its Firebase config
+inlined before uploading, because the failure mode is a guest-only build that looks
+perfectly healthy.
 
-The APK is **not** uploaded to the Play Store by CI. That stays a manual step, so a
-release is never pushed live by an automated run without a human deciding to do it.
+Android is deliberately not in this workflow. The release signing key is not in the
+repository and not in these secrets, so nothing in CI can produce an installable build.
+Signed artifacts are published by `mobile/release.sh` on a machine that holds the key,
+and the Play Store upload stays a manual step — so a release is never pushed live by an
+automated run without a human deciding to do it.
 
 ### Required repository secrets
 
 Add these under **Settings → Secrets and variables → Actions**:
 
-| Secret | Required for | What it is |
-|---|---|---|
-| `FIREBASE_SERVICE_ACCOUNT` | hosting | the service-account JSON for `firebase deploy` |
-| `FIREBASE_PROJECT_ID` | hosting | e.g. `kharchabachau` |
-| `CLOUDFLARE_API_TOKEN` | APK download | a Workers deploy token |
-| `CLOUDFLARE_ACCOUNT_ID` | APK download | the Cloudflare account |
-| `RELEASE_KEYSTORE_BASE64` | signed APK | `base64 -w0 mobile/keystore/release.keystore` |
-| `KEYSTORE_PROPERTIES` | signed APK | the contents of `mobile/keystore/keystore.properties` |
-| `GOOGLE_SERVICES_JSON` | signed APK | the contents of `mobile/google-services.json` |
+| Secret | What it is |
+|---|---|
+| `FIREBASE_SERVICE_ACCOUNT` | the service-account JSON for `firebase deploy` |
+| `FIREBASE_PROJECT_ID` | `kharchabachau` — note the spelling, it is not the same as the repo name |
 
-**Read this before adding the signing secrets.** `RELEASE_KEYSTORE_BASE64` puts your
-release signing key inside GitHub. That is the normal way to automate a release, and it is
-why GitHub secrets are acceptable, but it is a real trade: anyone who can run the workflow
-can produce a signed update to a published app, and a key leak means you must ask Google
-for a reset. If you would rather keep the key off GitHub, leave the three signing secrets
-unset — `android` still builds an unsigned bundle and uploads it as an artifact, and
-`deploy-apk` is skipped. You then upload the signed build yourself.
+Set with:
 
-The repository's `.env` is read by the `web` job for the `EXPO_PUBLIC_FIREBASE_*` values.
-Those are public Firebase client keys by design; the Firestore rules, not the keys, are
-the security boundary.
+```bash
+gh secret set FIREBASE_PROJECT_ID --body kharchabachau
+gh secret set FIREBASE_SERVICE_ACCOUNT < .secrets/firebase-adminsdk.json
+```
+
+There are no signing secrets, and that is a decision rather than an omission. Putting
+`RELEASE_KEYSTORE_BASE64` in GitHub would let the workflow produce signed updates to a
+published app, and a leak would mean asking Google to reset your Play upload key. CI
+deploys the site; `release.sh` publishes the binary. The key never leaves the machine.
+
+The repository's `.env` is read by the deploy job for the `EXPO_PUBLIC_FIREBASE_*`
+values. Those are public Firebase client keys by design; the Firestore rules, not the
+keys, are the security boundary.
+
+## Where the APK lives
+
+On GitHub Releases, attached to a release tagged with the app version. That was not the
+first choice, and the reasoning is worth keeping so nobody re-litigates it:
+
+- **Cloudflare Workers static assets** cap at 25 MiB. The APK is 30 MiB. R8 shrinking
+  took it from 38 MiB, and the remaining 18.65 MiB of arm64 native libraries do not
+  compress, so no amount of further shrinking reaches the limit for an app of this shape.
+- **Cloudflare R2** would work and has no per-file limit, but R2 is not enabled on the
+  account — it needs activating in the dashboard, which involves a payment method.
+  `release-cf/` was removed rather than left as dead configuration.
+- **Firebase Hosting** rejects it outright: `Executable files are forbidden on the Spark
+  billing plan`. This is the one that cannot be worked around by any means.
+
+GitHub Releases have no such ceiling, are versioned by tag for free, and let a download
+be traced to the exact commit it came from.
 
 ---
 
@@ -180,20 +199,19 @@ the security boundary.
 
 ### The `/release/` APK download
 
-`mobile/release.sh` builds, verifies the signing certificate, renders the download page
-and publishes the APK. It refuses to publish a debug-signed build, because such an APK
-installs fine and then can never be updated in place — a problem that only surfaces much
-later.
+`mobile/release.sh` builds, verifies the signing certificate, creates the GitHub Release
+and renders the download page. It refuses to publish a debug-signed build, because such an
+APK installs fine and then can never be updated in place — a problem that only surfaces
+much later.
 
-Every artifact is stamped with the short commit it was built from, and the page says so.
-The APK is published under both its commit name and a `latest` alias, so links people have
-already bookmarked keep working while the page links to the exact build.
+Artifacts are named `kharcha-bachau-<version>-<short commit>`, so a file someone is
+holding is identifiable, and the page shows the same commit. The release tag is the app
+version, which means `/releases/latest/` always resolves to the newest build.
 
 ```bash
-cd mobile && ./release.sh
+cd mobile && ./release.sh          # needs `gh auth login`
+npm run deploy:hosting             # from the repo root, publishes the page
 ```
-
-This also deploys to Cloudflare and prints a reminder to publish the hosting site.
 
 ### Losing the signing key
 
