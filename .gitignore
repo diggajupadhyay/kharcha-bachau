@@ -56,3 +56,14 @@ public/release/*.apk
 # Not a secret (the API key is public by design; the Firestore rules are the
 # security boundary), but kept out of the repo so a fork cannot target this project.
 mobile/google-services.json
+
+# Credentials and keys. Never commit anything in here — the service account carries
+# a private key that can read and write all of the project's Firestore data.
+#
+#   .secrets/firebase-adminsdk.json   -> GOOGLE_APPLICATION_CREDENTIALS for `firebase deploy`
+#   mobile/keystore/release.keystore  -> the Android release signing key
+#
+# Both are copies of things that exist in the Firebase and Cloudflare consoles, so
+# either can be re-downloaded. The keystore cannot be reissued: losing it means asking
+# Google to reset the Play upload key.
+.secrets/

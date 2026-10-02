@@ -36,6 +36,7 @@
         }
       ],
       "./plugins/withReleaseSigning",
+      "./plugins/withR8Release",
       "expo-sharing",
       "@react-native-community/datetimepicker",
       "@react-native-firebase/app",
