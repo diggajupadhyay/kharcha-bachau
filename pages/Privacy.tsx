@@ -176,10 +176,10 @@ const Privacy: React.FC = () => {
             <p>
               For privacy questions, or to request deletion of your data, email{' '}
               <a
-                href="mailto:dcozupadhyay@gmail.com"
+                href="mailto:me@diggajupadhyay.com.np"
                 className="font-medium text-emerald-700 underline break-all"
               >
-                dcozupadhyay@gmail.com
+                me@diggajupadhyay.com.np
               </a>
               . We respond within 30 days.
             </p>

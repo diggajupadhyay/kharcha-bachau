@@ -27,9 +27,10 @@ Everything below is already done and verified. You do **not** need to change any
 
 1. **The privacy policy is live at a real, public URL.** Play rejects a policy it cannot open.
    Whatever domain you publish the site on, the URL must load for Google without a login.
-2. **The developer contact email works.** The privacy policy currently lists
-   `dcozupadhyay@gmail.com`. Change it in `pages/Privacy.tsx` if you would rather use another
-   address, and make sure someone reads it.
+2. **The developer contact email works.** The privacy policy lists
+   `me@diggajupadhyay.com.np`, and that address must be live and read. Play requires a working
+   contact route, and an unreachable one is a common reason for rejection. If you later change
+   the address, change it in `pages/Privacy.tsx`.
 
 ---
 
