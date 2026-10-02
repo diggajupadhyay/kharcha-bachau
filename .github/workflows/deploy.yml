@@ -65,18 +65,20 @@ jobs:
 
       # Order matters: Vite empties dist/, so the landing page is built first and the
       # web app is written into dist/app afterwards.
+      - run: npm run build:all
+
+      # Assert the bundle really has its config before uploading. The failure mode
+      # this guards is a guest-only build that looks perfectly healthy.
       - name: Confirm the web bundle has its Firebase config
         run: |
           set -euo pipefail
           hits=$(grep -F -o "$VITE_FIREBASE_PROJECT_ID" \
             dist/app/_expo/static/js/web/index-*.js | wc -l)
           if [ "$hits" -eq 0 ]; then
-            echo "::error::The web bundle has no Firebase config inlined. It would ship as a guest-only app with no error. See DEPLOY.md on the Metro transform cache."
+            echo "::error::The web bundle has no Firebase config inlined — it would ship as a guest-only app with no error. See DEPLOY.md on the Metro transform cache."
             exit 1
           fi
           echo "Firebase config present ($hits references)."
-
-      - run: npm run build:all
 
       # The official CLI rather than a third-party action: the service-account
       # credentials work identically locally and here, so there is no wrapper whose
