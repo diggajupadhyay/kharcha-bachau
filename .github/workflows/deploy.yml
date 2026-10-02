@@ -37,6 +37,10 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      # The web build runs `expo export` inside mobile/, so the app's own dependencies
+      # are required too — without them Expo cannot resolve the project and the build
+      # fails with "Cannot determine the project's Expo SDK version".
+      - run: npm ci --prefix mobile
 
       # Firebase config is inlined into the web bundle at build time. It arrives as
       # repository *variables* rather than secrets because it is public by design —
