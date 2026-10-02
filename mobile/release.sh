@@ -82,6 +82,9 @@ echo "Signature verified: $ACTUAL_SHA256"
 VERSION=$(node -pe "require('../app.json').expo.version")
 SIZE=$(numfmt --to=iec --suffix=B "$(stat -c%s $APK)")
 COMMIT=$(git -C .. rev-parse --short HEAD)
+# The GitHub API rejects a short SHA as target_commitish, so the release tag needs the
+# full one. The short form stays in the asset name and on the page.
+FULL_COMMIT=$(git -C .. rev-parse HEAD)
 DATE=$(date +%d\ %b\ %Y)
 REPO=$(git -C .. remote get-url origin | sed -E 's#(git@github.com:|https://github.com/)##; s#\.git$##')
 TAG="v$VERSION"
@@ -108,14 +111,14 @@ if gh release view "$TAG" >/dev/null 2>&1; then
   gh release delete "$TAG" --yes --cleanup-tag
 fi
 gh release create "$TAG" "$STAGE/$APK_NAME#$APK_NAME" "$STAGE/$AAB_NAME#$AAB_NAME" \
-  --repo "$REPO" --title "Kharcha Bachau $TAG" --notes "$NOTES" --target "$COMMIT"
+  --repo "$REPO" --title "Kharcha Bachau $TAG" --notes "$NOTES" --target "$FULL_COMMIT"
 
-mkdir -p ../public/release
+mkdir -p ../../public/release
 sed -e "s/@@VERSION@@/$VERSION/g" \
     -e "s/@@SIZE@@/$SIZE/g" \
     -e "s/@@SHORTCOMMIT@@/$COMMIT/g" \
     -e "s/@@DATE@@/$DATE/g" \
-    ../release-page.html > ../public/release/index.html
+    ../../release-page.html > ../../public/release/index.html
 
 echo ""
 echo "Release shipped: $TAG ($SIZE) from $COMMIT"
