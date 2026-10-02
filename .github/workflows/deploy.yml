@@ -76,6 +76,10 @@ jobs:
       - name: Confirm the web bundle has its Firebase config
         run: |
           set -euo pipefail
+          # Read the same file the build read, rather than expecting the values in the
+          # environment: the previous step only wrote .env, so the check was grepping
+          # for an empty string and reporting a config that was in fact inlined.
+          set -a; . ./.env; set +a
           hits=$(grep -F -o "$VITE_FIREBASE_PROJECT_ID" \
             dist/app/_expo/static/js/web/index-*.js | wc -l)
           if [ "$hits" -eq 0 ]; then
