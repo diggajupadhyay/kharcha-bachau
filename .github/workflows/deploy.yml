@@ -49,23 +49,30 @@ jobs:
       # works, but in guest mode with no cloud sync, which looks fine and is not, so
       # this step fails loudly instead.
       - name: Write .env from repository variables
+        env:
+          FB_API_KEY: ${{ vars.VITE_FIREBASE_API_KEY }}
+          FB_AUTH_DOMAIN: ${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}
+          FB_PROJECT_ID: ${{ vars.VITE_FIREBASE_PROJECT_ID }}
+          FB_STORAGE_BUCKET: ${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}
+          FB_SENDER_ID: ${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}
+          FB_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
         run: |
           set -euo pipefail
           umask 077
           {
-            echo "VITE_FIREBASE_API_KEY=${{ vars.VITE_FIREBASE_API_KEY }}"
-            echo "VITE_FIREBASE_AUTH_DOMAIN=${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}"
-            echo "VITE_FIREBASE_PROJECT_ID=${{ vars.VITE_FIREBASE_PROJECT_ID }}"
-            echo "VITE_FIREBASE_STORAGE_BUCKET=${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}"
-            echo "VITE_FIREBASE_MESSAGING_SENDER_ID=${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}"
-            echo "VITE_FIREBASE_APP_ID=${{ vars.VITE_FIREBASE_APP_ID }}"
+            echo "VITE_FIREBASE_API_KEY=$FB_API_KEY"
+            echo "VITE_FIREBASE_AUTH_DOMAIN=$FB_AUTH_DOMAIN"
+            echo "VITE_FIREBASE_PROJECT_ID=$FB_PROJECT_ID"
+            echo "VITE_FIREBASE_STORAGE_BUCKET=$FB_STORAGE_BUCKET"
+            echo "VITE_FIREBASE_MESSAGING_SENDER_ID=$FB_SENDER_ID"
+            echo "VITE_FIREBASE_APP_ID=$FB_APP_ID"
           } > .env
-          echo "EXPO_PUBLIC_FIREBASE_API_KEY=${{ vars.VITE_FIREBASE_API_KEY }}"         >> "$GITHUB_ENV"
-          echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=${{ vars.VITE_FIREBASE_AUTH_DOMAIN }}" >> "$GITHUB_ENV"
-          echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=${{ vars.VITE_FIREBASE_PROJECT_ID }}"   >> "$GITHUB_ENV"
-          echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=${{ vars.VITE_FIREBASE_STORAGE_BUCKET }}" >> "$GITHUB_ENV"
-          echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=${{ vars.VITE_FIREBASE_MESSAGING_SENDER_ID }}" >> "$GITHUB_ENV"
-          echo "EXPO_PUBLIC_FIREBASE_APP_ID=${{ vars.VITE_FIREBASE_APP_ID }}"           >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FIREBASE_API_KEY=$FB_API_KEY"              >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN=$FB_AUTH_DOMAIN"    >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FIREBASE_PROJECT_ID=$FB_PROJECT_ID"      >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET=$FB_STORAGE_BUCKET" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=$FB_SENDER_ID" >> "$GITHUB_ENV"
+          echo "EXPO_PUBLIC_FIREBASE_APP_ID=$FB_APP_ID"                >> "$GITHUB_ENV"
 
       # Order matters: Vite empties dist/, so the landing page is built first and the
       # web app is written into dist/app afterwards.
@@ -91,11 +98,19 @@ jobs:
       # The official CLI rather than a third-party action: the service-account
       # credentials work identically locally and here, so there is no wrapper whose
       # input format or tag naming can break a deploy.
+      # The secret must arrive through `env:`, not by inlining ${{ ... }} into the
+      # script body. The service-account JSON is pretty-printed, and inline
+      # substitution pastes its newlines into the generated shell script, which
+      # mangles the file and leaves the CLI unable to authenticate.
       - name: Write the service account
+        env:
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
         run: |
           set -euo pipefail
           umask 077
-          printf '%s' "${{ secrets.FIREBASE_SERVICE_ACCOUNT }}" > "$RUNNER_TEMP/firebase-adminsdk.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT_JSON" > "$RUNNER_TEMP/firebase-adminsdk.json"
+          node -e 'const c=require(process.argv[1]); console.log("service account ok:", c.project_id, c.client_email)' \
+            "$RUNNER_TEMP/firebase-adminsdk.json"
           echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/firebase-adminsdk.json" >> "$GITHUB_ENV"
 
       - run: npm install -g firebase-tools@latest
